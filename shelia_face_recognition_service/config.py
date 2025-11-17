@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     debug: bool = False
 
+    # Security Settings
+    api_token: str
+
     # Server Settings
     host: str = "0.0.0.0"
     port: int = 8000

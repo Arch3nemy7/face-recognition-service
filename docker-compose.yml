@@ -30,6 +30,11 @@ services:
       - DEBUG=false
       - LOG_LEVEL=info
 
+      # Security Settings
+      # IMPORTANT: Change this token in production!
+      # Generate with: openssl rand -hex 32
+      - API_TOKEN=${API_TOKEN:-your-secure-random-token-here-change-this-in-production}
+
       # Model Settings
       - MODEL_NAME=buffalo_l
       - DETECTION_THRESHOLD=0.5

@@ -3,12 +3,13 @@
 import base64
 import logging
 from contextlib import asynccontextmanager
-from typing import List
+from typing import Annotated, List
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .auth import verify_token
 from .config import settings
 from .models.face_model import (
     FaceModelError,
@@ -129,6 +130,9 @@ async def health_check():
 
     Returns:
         HealthResponse with service status and model information
+
+    Note:
+        This endpoint does not require authentication for monitoring purposes
     """
     model = get_model()
     is_loaded = model.is_loaded()
@@ -144,6 +148,7 @@ async def health_check():
     f"{settings.api_v1_prefix}/model-info",
     response_model=ModelInfoResponse,
     tags=["Info"],
+    dependencies=[Depends(verify_token)],
 )
 async def model_info():
     """
@@ -151,6 +156,9 @@ async def model_info():
 
     Returns:
         ModelInfoResponse with model metadata
+
+    Security:
+        Requires valid Bearer token in Authorization header
     """
     model = get_model()
     info = model.get_model_info()
@@ -168,6 +176,7 @@ async def model_info():
     response_model=EmbedResponse,
     tags=["Face Recognition"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_token)],
 )
 async def extract_embedding(request: EmbedRequest):
     """
@@ -184,6 +193,9 @@ async def extract_embedding(request: EmbedRequest):
 
     Raises:
         HTTPException: If image processing or face detection fails
+
+    Security:
+        Requires valid Bearer token in Authorization header
     """
     try:
         # Decode image from base64
@@ -226,6 +238,7 @@ async def extract_embedding(request: EmbedRequest):
     response_model=CompareResponse,
     tags=["Face Recognition"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_token)],
 )
 async def compare_embeddings(request: CompareRequest):
     """
@@ -242,6 +255,9 @@ async def compare_embeddings(request: CompareRequest):
 
     Raises:
         HTTPException: If comparison fails
+
+    Security:
+        Requires valid Bearer token in Authorization header
     """
     try:
         logger.debug(
@@ -285,6 +301,7 @@ async def compare_embeddings(request: CompareRequest):
     response_model=ComparePhotosResponse,
     tags=["Face Recognition"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_token)],
 )
 async def compare_photos(
     image1: str = Form(..., description="First image URL (http:// or https://)"),
@@ -307,6 +324,9 @@ async def compare_photos(
 
     Raises:
         HTTPException: If image processing or face detection fails
+
+    Security:
+        Requires valid Bearer token in Authorization header
     """
     try:
         # Validate image1 URL
@@ -396,6 +416,7 @@ async def compare_photos(
     response_model=ComparePhotosResponse,
     tags=["Face Recognition"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(verify_token)],
 )
 async def compare_photos_upload(
     image1: UploadFile = File(..., description="First image file"),
@@ -421,6 +442,9 @@ async def compare_photos_upload(
 
     Raises:
         HTTPException: If image processing or face detection fails
+
+    Security:
+        Requires valid Bearer token in Authorization header
     """
     try:
         # Validate distance metric
