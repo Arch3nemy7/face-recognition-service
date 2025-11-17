@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  face-recognition:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shelia-face-recognition
+    ports:
+      - "8000:8000"
+    environment:
+      # API Settings
+      - APP_NAME=Shelia Face Recognition Service
+      - DEBUG=false
+      - LOG_LEVEL=info
+
+      # Model Settings
+      - MODEL_NAME=buffalo_l
+      - DETECTION_THRESHOLD=0.5
+      - DEVICE=cpu
+
+      # Image Processing
+      - MAX_IMAGE_SIZE=10485760
+
+      # CORS Settings
+      - CORS_ENABLED=true
+      # For production, specify exact origins:
+      # - CORS_ORIGINS=["https://your-backend.com"]
+    volumes:
+      # Optional: Mount .insightface directory to cache models
+      # This prevents re-downloading models on container restart
+      - insightface-models:/app/.insightface
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+volumes:
+  insightface-models:
+    driver: local

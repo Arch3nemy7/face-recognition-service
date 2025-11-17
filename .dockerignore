@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Development
+requirements-dev.txt
+.env.example
+.editorconfig
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# Misc
+*.log
+.cache/
+tmp/
+temp/
+
+# Claude Code
+.claude/

@@ -1,0 +1,19 @@
+# FastAPI and ASGI server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Data validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Face recognition (InsightFace with ArcFace)
+insightface==0.7.3
+onnxruntime==1.17.3
+
+# Image processing
+opencv-python>=4.10.0
+numpy<2.0,>=1.26.0
+Pillow>=10.2.0
+
+# HTTP utilities
+python-multipart==0.0.6
