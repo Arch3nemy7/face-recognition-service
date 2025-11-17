@@ -90,17 +90,26 @@ def fetch_image_from_url(url: str, timeout: int = 30) -> np.ndarray:
                 ErrorCode.INVALID_IMAGE
             )
 
-        # Fetch image from URL
-        response = requests.get(url, timeout=timeout, stream=True)
+        # Prepare headers to mimic a browser request
+        # Many CDN services block requests without proper User-Agent
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+
+        # Fetch image from URL with proper headers
+        response = requests.get(url, headers=headers, timeout=timeout, stream=True, allow_redirects=True)
         response.raise_for_status()
 
-        # Check Content-Type header
+        # Check Content-Type header (be more lenient for some CDNs)
         content_type = response.headers.get('Content-Type', '')
-        if not content_type.startswith('image/'):
-            raise ImageProcessingError(
-                f"URL does not point to an image. Content-Type: {content_type}",
-                ErrorCode.INVALID_IMAGE
-            )
+        # Some CDNs don't return proper Content-Type, so we'll be lenient
+        # and rely on image loading validation instead
 
         # Read image bytes
         image_bytes = response.content
