@@ -133,6 +133,11 @@ dmypy.json
 # InsightFace model cache
 .insightface/
 
+# SSL certificates
+nginx/ssl/*.pem
+nginx/ssl/*.key
+nginx/ssl/*.crt
+
 # Custom
 *.bak
 *.tmp

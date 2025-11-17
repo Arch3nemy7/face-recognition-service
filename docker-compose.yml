@@ -1,13 +1,29 @@
 version: '3.8'
 
 services:
+  # Nginx reverse proxy with HTTPS
+  nginx:
+    image: nginx:alpine
+    container_name: shelia-nginx-proxy
+    ports:
+      - "80:80"    # HTTP (redirects to HTTPS)
+      - "443:443"  # HTTPS
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - face-recognition
+    restart: unless-stopped
+    networks:
+      - face-recognition-network
+
   face-recognition:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: shelia-face-recognition
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"  # Only expose internally, not to host
     environment:
       # API Settings
       - APP_NAME=Shelia Face Recognition Service
@@ -46,6 +62,12 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
+    networks:
+      - face-recognition-network
+
+networks:
+  face-recognition-network:
+    driver: bridge
 
 volumes:
   insightface-models:
