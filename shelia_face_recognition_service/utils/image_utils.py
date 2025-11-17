@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 
 import cv2
 import numpy as np
+import requests
 from PIL import Image
 
 from ..config import settings
@@ -63,6 +64,73 @@ def decode_base64_image(base64_string: str) -> np.ndarray:
             raise
         raise ImageProcessingError(
             f"Failed to decode image: {str(e)}",
+            ErrorCode.INVALID_IMAGE
+        )
+
+
+def fetch_image_from_url(url: str, timeout: int = 30) -> np.ndarray:
+    """
+    Fetch an image from a URL and convert to numpy array.
+
+    Args:
+        url: Image URL to fetch
+        timeout: Request timeout in seconds (default: 30)
+
+    Returns:
+        numpy array in BGR format (OpenCV format)
+
+    Raises:
+        ImageProcessingError: If fetching fails or image is invalid
+    """
+    try:
+        # Validate URL format
+        if not url.startswith(('http://', 'https://')):
+            raise ImageProcessingError(
+                f"Invalid URL format. URL must start with http:// or https://",
+                ErrorCode.INVALID_IMAGE
+            )
+
+        # Fetch image from URL
+        response = requests.get(url, timeout=timeout, stream=True)
+        response.raise_for_status()
+
+        # Check Content-Type header
+        content_type = response.headers.get('Content-Type', '')
+        if not content_type.startswith('image/'):
+            raise ImageProcessingError(
+                f"URL does not point to an image. Content-Type: {content_type}",
+                ErrorCode.INVALID_IMAGE
+            )
+
+        # Read image bytes
+        image_bytes = response.content
+
+        # Check size limit
+        if len(image_bytes) > settings.max_image_size:
+            raise ImageProcessingError(
+                f"Image size ({len(image_bytes)} bytes) exceeds maximum allowed "
+                f"({settings.max_image_size} bytes)",
+                ErrorCode.IMAGE_TOO_LARGE
+            )
+
+        # Convert bytes to numpy array
+        return load_image_from_bytes(image_bytes)
+
+    except requests.exceptions.Timeout:
+        raise ImageProcessingError(
+            f"Request timeout while fetching image from URL: {url}",
+            ErrorCode.PROCESSING_ERROR
+        )
+    except requests.exceptions.RequestException as e:
+        raise ImageProcessingError(
+            f"Failed to fetch image from URL: {str(e)}",
+            ErrorCode.INVALID_IMAGE
+        )
+    except Exception as e:
+        if isinstance(e, ImageProcessingError):
+            raise
+        raise ImageProcessingError(
+            f"Failed to load image from URL: {str(e)}",
             ErrorCode.INVALID_IMAGE
         )
 
@@ -151,7 +219,7 @@ def validate_image(image: np.ndarray) -> Tuple[bool, Optional[str]]:
         return False, f"Image too small: {width}x{height}. Minimum size: {min_size}x{min_size}"
 
     # Check maximum dimensions (prevent memory issues)
-    max_size = 4096
+    max_size = 8192
     if height > max_size or width > max_size:
         return False, f"Image too large: {width}x{height}. Maximum size: {max_size}x{max_size}"
 

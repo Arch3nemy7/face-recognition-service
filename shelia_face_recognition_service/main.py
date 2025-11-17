@@ -28,7 +28,7 @@ from .schemas.api_schemas import (
     ModelInfoResponse,
 )
 from .utils.embedding_utils import calculate_distance, distance_to_similarity, find_best_match
-from .utils.image_utils import ImageProcessingError, decode_base64_image, preprocess_image
+from .utils.image_utils import ImageProcessingError, decode_base64_image, fetch_image_from_url, preprocess_image
 
 # Configure logging
 logging.basicConfig(
@@ -290,11 +290,11 @@ async def compare_photos(request: ComparePhotosRequest):
     """
     Compare two photos directly and return similarity score.
 
-    This endpoint accepts two base64-encoded images, extracts face embeddings
+    This endpoint accepts two image URLs, fetches the images, extracts face embeddings
     from both, and compares them to determine if they match.
 
     Args:
-        request: ComparePhotosRequest with two base64-encoded images
+        request: ComparePhotosRequest with two image URLs
 
     Returns:
         ComparePhotosResponse with match result, similarity score, and distance
@@ -303,9 +303,9 @@ async def compare_photos(request: ComparePhotosRequest):
         HTTPException: If image processing or face detection fails
     """
     try:
-        logger.debug("Processing first image...")
-        # Decode and process first image
-        image1 = decode_base64_image(request.image1)
+        logger.debug(f"Fetching first image from URL: {request.image1}")
+        # Fetch and process first image from URL
+        image1 = fetch_image_from_url(request.image1)
         image1 = preprocess_image(image1)
 
         # Get model and extract embedding from first image
@@ -313,9 +313,9 @@ async def compare_photos(request: ComparePhotosRequest):
         embedding1, detection_score1 = model.get_embedding(image1, return_detection_info=True)
         logger.debug(f"First image processed (detection score: {detection_score1:.4f})")
 
-        logger.debug("Processing second image...")
-        # Decode and process second image
-        image2 = decode_base64_image(request.image2)
+        logger.debug(f"Fetching second image from URL: {request.image2}")
+        # Fetch and process second image from URL
+        image2 = fetch_image_from_url(request.image2)
         image2 = preprocess_image(image2)
 
         # Extract embedding from second image

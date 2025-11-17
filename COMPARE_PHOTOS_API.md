@@ -4,7 +4,7 @@
 
 The face recognition service provides **two endpoints** for comparing photos:
 
-1. **`/api/v1/compare-photos`** - JSON-based endpoint for programmatic API usage (base64-encoded images)
+1. **`/api/v1/compare-photos`** - JSON-based endpoint for programmatic API usage (image URLs)
 2. **`/api/v1/compare-photos-upload`** - File upload endpoint for easy testing via Swagger UI (file picker)
 
 Both endpoints provide the same functionality - they compare two photos to determine if they contain the same person.
@@ -70,14 +70,15 @@ curl -X POST "http://localhost:8000/api/v1/compare-photos-upload?distance_metric
 - **URL**: `/api/v1/compare-photos`
 - **Method**: `POST`
 - **Content-Type**: `application/json`
+- **Input**: Image URLs (not base64)
 
 ## Request Schema
 
 ```json
 {
-  "image1": "base64-encoded-image-string",
-  "image2": "base64-encoded-image-string",
-  "distance_metric": "cosine"  // optional, default: "cosine", options: "cosine" | "euclidean"
+  "image1": "https://example.com/photo1.jpg",
+  "image2": "https://example.com/photo2.jpg",
+  "distance_metric": "cosine"
 }
 ```
 
@@ -85,15 +86,15 @@ curl -X POST "http://localhost:8000/api/v1/compare-photos-upload?distance_metric
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `image1` | string | Yes | - | First base64-encoded image (with or without data URI prefix) |
-| `image2` | string | Yes | - | Second base64-encoded image (with or without data URI prefix) |
+| `image1` | string | Yes | - | First image URL (must start with http:// or https://) |
+| `image2` | string | Yes | - | Second image URL (must start with http:// or https://) |
 | `distance_metric` | string | No | "cosine" | Distance metric to use: "cosine" or "euclidean" |
 
 ### Image Requirements
 
 - **Format**: JPEG, PNG, BMP, WebP
 - **Size**: Maximum 10MB per image
-- **Dimensions**: Minimum 32x32, Maximum 4096x4096 pixels
+- **Dimensions**: Minimum 32x32, Maximum 8192x8192 pixels
 - **Faces**: Each image must contain **exactly ONE** clear, frontal face
 - **Quality**: Good lighting, minimal occlusion, clear facial features
 
@@ -159,39 +160,27 @@ For custom thresholds, use the `similarity` or `distance` values directly.
 ### cURL Example
 
 ```bash
-# Prepare base64-encoded images
-IMAGE1=$(base64 -w 0 photo1.jpg)
-IMAGE2=$(base64 -w 0 photo2.jpg)
-
-# Send request
+# Send request with image URLs
 curl -X POST http://localhost:8000/api/v1/compare-photos \
   -H "Content-Type: application/json" \
-  -d "{
-    \"image1\": \"$IMAGE1\",
-    \"image2\": \"$IMAGE2\",
-    \"distance_metric\": \"cosine\"
-  }"
+  -d '{
+    "image1": "https://example.com/photo1.jpg",
+    "image2": "https://example.com/photo2.jpg",
+    "distance_metric": "cosine"
+  }'
 ```
 
 ### Python Example
 
 ```python
-import base64
 import requests
 
-# Read and encode images
-with open('photo1.jpg', 'rb') as f:
-    image1_b64 = base64.b64encode(f.read()).decode('utf-8')
-
-with open('photo2.jpg', 'rb') as f:
-    image2_b64 = base64.b64encode(f.read()).decode('utf-8')
-
-# Send request
+# Send request with image URLs
 response = requests.post(
     'http://localhost:8000/api/v1/compare-photos',
     json={
-        'image1': image1_b64,
-        'image2': image2_b64,
+        'image1': 'https://example.com/photo1.jpg',
+        'image2': 'https://example.com/photo2.jpg',
         'distance_metric': 'cosine'
     }
 )
@@ -209,29 +198,16 @@ else:
 ### JavaScript Example
 
 ```javascript
-// Helper function to convert file to base64
-async function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// Compare two photos
-async function comparePhotos(file1, file2) {
-  const image1 = await fileToBase64(file1);
-  const image2 = await fileToBase64(file2);
-
+// Compare two photos using URLs
+async function comparePhotos(imageUrl1, imageUrl2) {
   const response = await fetch('http://localhost:8000/api/v1/compare-photos', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      image1,
-      image2,
+      image1: imageUrl1,
+      image2: imageUrl2,
       distance_metric: 'cosine'
     })
   });
@@ -246,6 +222,12 @@ async function comparePhotos(file1, file2) {
     console.error('Error:', result.error);
   }
 }
+
+// Usage
+comparePhotos(
+  'https://example.com/photo1.jpg',
+  'https://example.com/photo2.jpg'
+);
 ```
 
 ### PHP Example (Laravel)
@@ -253,14 +235,10 @@ async function comparePhotos(file1, file2) {
 ```php
 use Illuminate\Support\Facades\Http;
 
-// Read and encode images
-$image1 = base64_encode(file_get_contents('photo1.jpg'));
-$image2 = base64_encode(file_get_contents('photo2.jpg'));
-
-// Send request
+// Send request with image URLs
 $response = Http::post('http://localhost:8000/api/v1/compare-photos', [
-    'image1' => $image1,
-    'image2' => $image2,
+    'image1' => 'https://example.com/photo1.jpg',
+    'image2' => 'https://example.com/photo2.jpg',
     'distance_metric' => 'cosine'
 ]);
 

@@ -140,12 +140,12 @@ class ComparePhotosRequest(BaseModel):
 
     image1: str = Field(
         ...,
-        description="First base64-encoded image string",
+        description="First image URL (http:// or https://)",
         min_length=1
     )
     image2: str = Field(
         ...,
-        description="Second base64-encoded image string",
+        description="Second image URL (http:// or https://)",
         min_length=1
     )
     distance_metric: str = Field(
@@ -155,11 +155,14 @@ class ComparePhotosRequest(BaseModel):
 
     @field_validator("image1", "image2")
     @classmethod
-    def validate_base64(cls, v: str) -> str:
-        """Validate that the image string is not empty."""
+    def validate_url(cls, v: str) -> str:
+        """Validate that the image URL is not empty and has valid format."""
         if not v or not v.strip():
-            raise ValueError("Image data cannot be empty")
-        return v.strip()
+            raise ValueError("Image URL cannot be empty")
+        v = v.strip()
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError("Image URL must start with http:// or https://")
+        return v
 
     @field_validator("distance_metric")
     @classmethod
