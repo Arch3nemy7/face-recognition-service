@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import List
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -286,15 +286,21 @@ async def compare_embeddings(request: CompareRequest):
     tags=["Face Recognition"],
     status_code=status.HTTP_200_OK,
 )
-async def compare_photos(request: ComparePhotosRequest):
+async def compare_photos(
+    image1: str = Form(..., description="First image URL (http:// or https://)"),
+    image2: UploadFile = File(..., description="Second image file"),
+    distance_metric: str = Form("cosine", description="Distance metric: 'cosine' or 'euclidean'"),
+):
     """
     Compare two photos directly and return similarity score.
 
-    This endpoint accepts two image URLs, fetches the images, extracts face embeddings
-    from both, and compares them to determine if they match.
+    This endpoint accepts one image URL for the first image and a file upload for the second image.
+    It fetches/processes both images, extracts face embeddings, and compares them to determine if they match.
 
     Args:
-        request: ComparePhotosRequest with two image URLs
+        image1: First image URL (http:// or https://)
+        image2: Second image file to upload
+        distance_metric: Distance metric to use ('cosine' or 'euclidean')
 
     Returns:
         ComparePhotosResponse with match result, similarity score, and distance
@@ -303,36 +309,59 @@ async def compare_photos(request: ComparePhotosRequest):
         HTTPException: If image processing or face detection fails
     """
     try:
-        logger.debug(f"Fetching first image from URL: {request.image1}")
+        # Validate image1 URL
+        if not image1 or not image1.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Image URL cannot be empty",
+            )
+
+        image1 = image1.strip()
+        if not image1.startswith(('http://', 'https://')):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Image URL must start with http:// or https://",
+            )
+
+        # Validate distance metric
+        if distance_metric.lower() not in ["cosine", "euclidean"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Distance metric must be 'cosine' or 'euclidean', got '{distance_metric}'",
+            )
+
+        logger.debug(f"Fetching first image from URL: {image1}")
         # Fetch and process first image from URL
-        image1 = fetch_image_from_url(request.image1)
-        image1 = preprocess_image(image1)
+        img1 = fetch_image_from_url(image1)
+        img1 = preprocess_image(img1)
 
         # Get model and extract embedding from first image
         model = get_model()
-        embedding1, detection_score1 = model.get_embedding(image1, return_detection_info=True)
+        embedding1, detection_score1 = model.get_embedding(img1, return_detection_info=True)
         logger.debug(f"First image processed (detection score: {detection_score1:.4f})")
 
-        logger.debug(f"Fetching second image from URL: {request.image2}")
-        # Fetch and process second image from URL
-        image2 = fetch_image_from_url(request.image2)
-        image2 = preprocess_image(image2)
+        logger.debug(f"Reading second image file: {image2.filename}")
+        # Read and process second image from upload
+        image2_bytes = await image2.read()
+        image2_b64 = base64.b64encode(image2_bytes).decode("utf-8")
+        img2 = decode_base64_image(image2_b64)
+        img2 = preprocess_image(img2)
 
         # Extract embedding from second image
-        embedding2, detection_score2 = model.get_embedding(image2, return_detection_info=True)
+        embedding2, detection_score2 = model.get_embedding(img2, return_detection_info=True)
         logger.debug(f"Second image processed (detection score: {detection_score2:.4f})")
 
         # Calculate distance between embeddings
-        logger.debug(f"Calculating {request.distance_metric} distance...")
-        distance = calculate_distance(embedding1, embedding2, metric=request.distance_metric)
+        logger.debug(f"Calculating {distance_metric} distance...")
+        distance = calculate_distance(embedding1, embedding2, metric=distance_metric.lower())
 
         # Convert distance to similarity
-        similarity = distance_to_similarity(distance, metric=request.distance_metric)
+        similarity = distance_to_similarity(distance, metric=distance_metric.lower())
 
         # Determine if it's a match based on typical thresholds
         # For cosine: distance < 0.4 is typically a good match
         # For euclidean: distance < 1.0 is typically a good match
-        if request.distance_metric == "cosine":
+        if distance_metric.lower() == "cosine":
             is_match = distance < 0.4
         else:  # euclidean
             is_match = distance < 1.0
@@ -346,7 +375,7 @@ async def compare_photos(request: ComparePhotosRequest):
             match=is_match,
             similarity=similarity,
             distance=distance,
-            distance_metric=request.distance_metric,
+            distance_metric=distance_metric.lower(),
             image1_detection_score=detection_score1,
             image2_detection_score=detection_score2,
         )
