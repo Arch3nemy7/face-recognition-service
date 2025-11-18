@@ -1,21 +1,32 @@
 version: '3.8'
 
 services:
-  # Nginx reverse proxy with HTTPS
+  certbot:
+    image: certbot/certbot
+    container_name: shelia-certbot
+    volumes:
+      - ./nginx/ssl:/etc/letsencrypt
+      - ./nginx/certbot-webroot:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - face-recognition-network
+
   nginx:
     image: nginx:alpine
     container_name: shelia-nginx-proxy
     ports:
-      - "80:80"    # HTTP (redirects to HTTPS)
-      - "443:443"  # HTTPS
+      - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/ssl:/etc/letsencrypt:ro
+      - ./nginx/certbot-webroot:/var/www/certbot:ro
     depends_on:
       - face-recognition
     restart: unless-stopped
     networks:
       - face-recognition-network
+      - proxy-network
 
   face-recognition:
     build:
@@ -23,33 +34,18 @@ services:
       dockerfile: Dockerfile
     container_name: shelia-face-recognition
     expose:
-      - "8000"  # Only expose internally, not to host
+      - "8000"
     environment:
-      # API Settings
       - APP_NAME=Shelia Face Recognition Service
       - DEBUG=false
       - LOG_LEVEL=info
-
-      # Security Settings
-      # IMPORTANT: Change this token in production!
-      # Generate with: openssl rand -hex 32
       - API_TOKEN=${API_TOKEN:-your-secure-random-token-here-change-this-in-production}
-
-      # Model Settings
       - MODEL_NAME=buffalo_l
       - DETECTION_THRESHOLD=0.5
       - DEVICE=cpu
-
-      # Image Processing
       - MAX_IMAGE_SIZE=10485760
-
-      # CORS Settings
       - CORS_ENABLED=true
-      # For production, specify exact origins:
-      # - CORS_ORIGINS=["https://your-backend.com"]
     volumes:
-      # Optional: Mount .insightface directory to cache models
-      # This prevents re-downloading models on container restart
       - insightface-models:/app/.insightface
     restart: unless-stopped
     healthcheck:
@@ -58,7 +54,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    # Resource limits (adjust based on your needs)
     deploy:
       resources:
         limits:
@@ -70,9 +65,20 @@ services:
     networks:
       - face-recognition-network
 
+  minecraft-connector:
+    image: alpine
+    container_name: minecraft-network-connector
+    command: tail -f /dev/null
+    networks:
+      - proxy-network
+    profiles:
+      - donotstart
+
 networks:
   face-recognition-network:
     driver: bridge
+  proxy-network:
+    external: true 
 
 volumes:
   insightface-models:
