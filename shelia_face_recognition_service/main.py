@@ -20,6 +20,7 @@ from .models.face_model import (
 from .schemas.api_schemas import (
     ComparePhotosRequest,
     ComparePhotosResponse,
+    ComparePhotosUploadRequest,
     CompareRequest,
     CompareResponse,
     EmbedRequest,
@@ -465,7 +466,7 @@ async def compare_photos_upload(
         image2_b64 = base64.b64encode(image2_bytes).decode("utf-8")
 
         # Create request object
-        request = ComparePhotosRequest(
+        request = ComparePhotosUploadRequest(
             image1=image1_b64,
             image2=image2_b64,
             distance_metric=distance_metric.lower(),

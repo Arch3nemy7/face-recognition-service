@@ -174,6 +174,42 @@ class ComparePhotosRequest(BaseModel):
         return v.lower()
 
 
+class ComparePhotosUploadRequest(BaseModel):
+    """Request schema for comparing two photos via file upload (base64-encoded images)."""
+
+    image1: str = Field(
+        ...,
+        description="First image as base64-encoded string",
+        min_length=1
+    )
+    image2: str = Field(
+        ...,
+        description="Second image as base64-encoded string",
+        min_length=1
+    )
+    distance_metric: str = Field(
+        default="cosine",
+        description="Distance metric to use: 'cosine' or 'euclidean'"
+    )
+
+    @field_validator("image1", "image2")
+    @classmethod
+    def validate_base64(cls, v: str) -> str:
+        """Validate that the image data is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Image data cannot be empty")
+        return v.strip()
+
+    @field_validator("distance_metric")
+    @classmethod
+    def validate_metric(cls, v: str) -> str:
+        """Validate distance metric."""
+        allowed = {"cosine", "euclidean"}
+        if v.lower() not in allowed:
+            raise ValueError(f"Distance metric must be one of {allowed}")
+        return v.lower()
+
+
 class ComparePhotosResponse(BaseModel):
     """Response schema for comparing two photos."""
 
