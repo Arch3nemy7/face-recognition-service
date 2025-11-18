@@ -1,3 +1,7 @@
+# Nginx Configuration Template
+# IMPORTANT: Replace {{DOMAIN_NAME}} with your actual domain name before using
+# Example: face-recognition.yourdomain.com
+
 events {
     worker_connections 1024;
 }
@@ -49,7 +53,6 @@ http {
 
     server {
         listen 80;
-        # ⚠️ TEMPLATE: Replace {{DOMAIN_NAME}} with your domain (e.g., api.yourdomain.com)
         server_name {{DOMAIN_NAME}};
 
         location /.well-known/acme-challenge/ {
@@ -67,10 +70,8 @@ http {
 
     server {
         listen 443 ssl http2;
-        # ⚠️ TEMPLATE: Replace {{DOMAIN_NAME}} with your domain (e.g., api.yourdomain.com)
         server_name {{DOMAIN_NAME}};
 
-        # ⚠️ TEMPLATE: Update these paths with your domain name
         ssl_certificate /etc/letsencrypt/live/{{DOMAIN_NAME}}/fullchain.pem;
         ssl_certificate_key /etc/letsencrypt/live/{{DOMAIN_NAME}}/privkey.pem;
 

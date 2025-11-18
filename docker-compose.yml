@@ -3,17 +3,17 @@ version: '3.8'
 services:
   certbot:
     image: certbot/certbot
-    container_name: shelia-certbot
+    container_name: ${CONTAINER_PREFIX:-shelia}-certbot
     volumes:
       - ./nginx/ssl:/etc/letsencrypt
       - ./nginx/certbot-webroot:/var/www/certbot
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
     networks:
-      - face-recognition-network
+      - ${INTERNAL_NETWORK_NAME}
 
   nginx:
     image: nginx:alpine
-    container_name: shelia-nginx-proxy
+    container_name: ${CONTAINER_PREFIX:-shelia}-nginx-proxy
     ports:
       - "80:80"
       - "443:443"
@@ -23,31 +23,32 @@ services:
       - ./nginx/certbot-webroot:/var/www/certbot:ro
     depends_on:
       - face-recognition
-    restart: unless-stopped
+    restart: ${RESTART_POLICY:-unless-stopped}
     networks:
-      - face-recognition-network
-      - proxy-network
+      - ${INTERNAL_NETWORK_NAME}
+      - ${EXTERNAL_NETWORK_NAME}
 
   face-recognition:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: shelia-face-recognition
+    container_name: ${CONTAINER_PREFIX:-shelia}-face-recognition
     expose:
       - "8000"
     environment:
-      - APP_NAME=Shelia Face Recognition Service
-      - DEBUG=false
-      - LOG_LEVEL=info
+      - APP_NAME=${APP_NAME:-Shelia Face Recognition Service}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
       - API_TOKEN=${API_TOKEN:-your-secure-random-token-here-change-this-in-production}
-      - MODEL_NAME=buffalo_l
-      - DETECTION_THRESHOLD=0.5
-      - DEVICE=cpu
-      - MAX_IMAGE_SIZE=10485760
-      - CORS_ENABLED=true
+      - MODEL_NAME=${MODEL_NAME:-buffalo_l}
+      - DETECTION_THRESHOLD=${DETECTION_THRESHOLD:-0.5}
+      - DEVICE=${DEVICE:-cpu}
+      - MAX_IMAGE_SIZE=${MAX_IMAGE_SIZE:-10485760}
+      - CORS_ENABLED=${CORS_ENABLED:-true}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["*"]}
     volumes:
       - insightface-models:/app/.insightface
-    restart: unless-stopped
+    restart: ${RESTART_POLICY:-unless-stopped}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 30s
@@ -57,28 +58,28 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '${FACE_RECOGNITION_CPU_LIMIT:-2}'
+          memory: ${FACE_RECOGNITION_MEMORY_LIMIT:-2G}
         reservations:
-          cpus: '1'
-          memory: 1G
+          cpus: '${FACE_RECOGNITION_CPU_RESERVATION:-1}'
+          memory: ${FACE_RECOGNITION_MEMORY_RESERVATION:-1G}
     networks:
-      - face-recognition-network
+      - ${INTERNAL_NETWORK_NAME}
 
   minecraft-connector:
     image: alpine
-    container_name: minecraft-network-connector
+    container_name: ${CONTAINER_PREFIX:-shelia}-minecraft-connector
     command: tail -f /dev/null
     networks:
-      - proxy-network
+      - ${EXTERNAL_NETWORK_NAME}
     profiles:
       - donotstart
 
 networks:
-  face-recognition-network:
+  ${INTERNAL_NETWORK_NAME}:
     driver: bridge
-  proxy-network:
-    external: true 
+  ${EXTERNAL_NETWORK_NAME}:
+    external: true
 
 volumes:
   insightface-models:
