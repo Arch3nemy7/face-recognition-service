@@ -1,0 +1,23 @@
+# Cloudflare API Credentials for Certbot DNS Challenge
+#
+# IMPORTANT: Copy this file to cloudflare.ini and fill in your credentials
+#     cp cloudflare.ini.template cloudflare.ini
+#
+# This file contains sensitive credentials - NEVER commit it to version control!
+# Add certbot/credentials/cloudflare.ini to your .gitignore
+
+# Cloudflare API Token
+# Generate at: https://dash.cloudflare.com/profile/api-tokens
+# Required permissions:
+#   - Zone.Zone:Read
+#   - Zone.DNS:Edit
+dns_cloudflare_api_token = your_cloudflare_api_token_here
+
+# Alternative: Use email and API key (less secure, not recommended)
+# Uncomment below and comment out api_token if using email/key method
+# dns_cloudflare_email = your_cloudflare_email@example.com
+# dns_cloudflare_api_key = your_cloudflare_global_api_key
+
+# Optional: DNS propagation wait time (default is 30 seconds)
+# Increase if you have slow DNS propagation
+# dns_cloudflare_propagation_seconds = 30
