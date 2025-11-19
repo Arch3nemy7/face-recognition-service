@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Shelia Face Recognition Service - Setup Script
+# Face Recognition Service - Setup Script
 # This script sets up the Python virtual environment and installs dependencies
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Shelia Face Recognition Service Setup"
+echo "Face Recognition Service Setup"
 echo "=========================================="
 echo ""
 
@@ -47,10 +47,10 @@ echo "To activate the virtual environment, run:"
 echo "  source .venv/bin/activate"
 echo ""
 echo "To start the service, run:"
-echo "  uvicorn shelia_face_recognition_service.main:app --host 0.0.0.0 --port 8000"
+echo "  uvicorn face_recognition_service.main:app --host 0.0.0.0 --port 8000"
 echo ""
 echo "Or simply:"
-echo "  python -m shelia_face_recognition_service.main"
+echo "  python -m face_recognition_service.main"
 echo ""
 echo "API documentation will be available at:"
 echo "  http://localhost:8000/docs"

@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for Shelia Face Recognition Service
+# Multi-stage Dockerfile for Face Recognition Service
 # This Dockerfile creates an optimized production image with minimal size
 
 # Stage 1: Builder
@@ -65,7 +65,7 @@ RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 
 # Copy application code
-COPY --chown=appuser:appuser shelia_face_recognition_service /app/shelia_face_recognition_service
+COPY --chown=appuser:appuser face_recognition_service /app/face_recognition_service
 
 # Switch to non-root user
 USER appuser
@@ -78,4 +78,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
 
 # Run the application
-CMD ["uvicorn", "shelia_face_recognition_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "face_recognition_service.main:app", "--host", "0.0.0.0", "--port", "8000"]

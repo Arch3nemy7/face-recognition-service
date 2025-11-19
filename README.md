@@ -1,4 +1,4 @@
-# Shelia Face Recognition Service
+# Face Recognition Service
 
 A stateless, production-ready Python microservice for face embedding extraction and comparison using ArcFace via InsightFace. This service is designed to replace third-party face recognition providers while keeping all user data and business logic in your main backend.
 
@@ -28,7 +28,7 @@ This microservice is designed to work alongside your existing attendance system:
 │                    │ HTTP Requests           │
 │                    ▼                         │
 │  ┌────────────────────────────────────────┐ │
-│  │   Shelia Face Recognition Service      │ │
+│  │   Face Recognition Service             │ │
 │  │ ┌────────────────────────────────────┐ │ │
 │  │ │ POST /api/v1/embed                 │ │ │
 │  │ │   → Extract face embedding         │ │ │
@@ -54,7 +54,7 @@ This microservice is designed to work alongside your existing attendance system:
 #### 1. Clone the Repository
 
 ```bash
-cd shelia-face-recognition-service
+cd face-recognition-service
 ```
 
 #### 2. Create Python Virtual Environment
@@ -90,10 +90,10 @@ On first run, InsightFace will automatically download the ArcFace model (~140MB)
 
 ```bash
 # Development mode (with auto-reload)
-uvicorn shelia_face_recognition_service.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn face_recognition_service.main:app --reload --host 0.0.0.0 --port 8000
 
 # Or using Python
-python -m shelia_face_recognition_service.main
+python -m face_recognition_service.main
 ```
 
 The service will be available at:
@@ -355,7 +355,7 @@ Create a `.env` file to customize settings:
 
 ```env
 # API Settings
-APP_NAME=Shelia Face Recognition Service
+APP_NAME=Face Recognition Service
 DEBUG=false
 LOG_LEVEL=info
 
@@ -387,7 +387,7 @@ CORS_ORIGINS=["*"]
 ### Build Image
 
 ```bash
-docker build -t shelia-face-recognition:latest .
+docker build -t face-recognition:latest .
 ```
 
 ### Run Container
@@ -398,7 +398,7 @@ docker run -d \
   -p 8000:8000 \
   -e LOG_LEVEL=info \
   -e DEVICE=cpu \
-  shelia-face-recognition:latest
+  face-recognition:latest
 ```
 
 ### Docker Compose
@@ -570,19 +570,19 @@ pytest tests/ -v
 
 ```bash
 # Format code
-black shelia_face_recognition_service/
+black face_recognition_service/
 
 # Sort imports
-isort shelia_face_recognition_service/
+isort face_recognition_service/
 
 # Lint
-flake8 shelia_face_recognition_service/
+flake8 face_recognition_service/
 ```
 
 ### Type Checking
 
 ```bash
-mypy shelia_face_recognition_service/
+mypy face_recognition_service/
 ```
 
 ## Extensibility

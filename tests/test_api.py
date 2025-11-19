@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from shelia_face_recognition_service.main import app
+from face_recognition_service.main import app
 
 
 @pytest.fixture(scope="module")
@@ -232,7 +232,7 @@ class TestEmbeddingUtils:
 
     def test_cosine_distance_identical(self, sample_embedding: list[float]):
         """Test cosine distance between identical embeddings."""
-        from shelia_face_recognition_service.utils.embedding_utils import cosine_distance
+        from face_recognition_service.utils.embedding_utils import cosine_distance
 
         emb = np.array(sample_embedding)
         distance = cosine_distance(emb, emb)
@@ -242,7 +242,7 @@ class TestEmbeddingUtils:
 
     def test_euclidean_distance_identical(self, sample_embedding: list[float]):
         """Test euclidean distance between identical embeddings."""
-        from shelia_face_recognition_service.utils.embedding_utils import euclidean_distance
+        from face_recognition_service.utils.embedding_utils import euclidean_distance
 
         emb = np.array(sample_embedding)
         distance = euclidean_distance(emb, emb)
@@ -252,7 +252,7 @@ class TestEmbeddingUtils:
 
     def test_distance_to_similarity(self):
         """Test distance to similarity conversion."""
-        from shelia_face_recognition_service.utils.embedding_utils import distance_to_similarity
+        from face_recognition_service.utils.embedding_utils import distance_to_similarity
 
         # Cosine distance of 0 should give similarity of 1
         assert distance_to_similarity(0.0, "cosine") == 1.0
@@ -266,7 +266,7 @@ class TestEmbeddingUtils:
 
     def test_is_valid_embedding(self):
         """Test embedding validation."""
-        from shelia_face_recognition_service.utils.embedding_utils import is_valid_embedding
+        from face_recognition_service.utils.embedding_utils import is_valid_embedding
 
         # Valid embedding
         valid = [0.1] * 512
@@ -290,7 +290,7 @@ class TestImageUtils:
 
     def test_validate_image_valid(self):
         """Test image validation with valid image."""
-        from shelia_face_recognition_service.utils.image_utils import validate_image
+        from face_recognition_service.utils.image_utils import validate_image
 
         valid_image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
         is_valid, error = validate_image(valid_image)
@@ -300,7 +300,7 @@ class TestImageUtils:
 
     def test_validate_image_too_small(self):
         """Test image validation with too small image."""
-        from shelia_face_recognition_service.utils.image_utils import validate_image
+        from face_recognition_service.utils.image_utils import validate_image
 
         small_image = np.random.randint(0, 255, (10, 10, 3), dtype=np.uint8)
         is_valid, error = validate_image(small_image)
@@ -310,7 +310,7 @@ class TestImageUtils:
 
     def test_validate_image_none(self):
         """Test image validation with None."""
-        from shelia_face_recognition_service.utils.image_utils import validate_image
+        from face_recognition_service.utils.image_utils import validate_image
 
         is_valid, error = validate_image(None)
 
@@ -319,7 +319,7 @@ class TestImageUtils:
 
     def test_encode_decode_image(self):
         """Test encoding and decoding images."""
-        from shelia_face_recognition_service.utils.image_utils import (
+        from face_recognition_service.utils.image_utils import (
             decode_base64_image,
             encode_image_to_base64
         )

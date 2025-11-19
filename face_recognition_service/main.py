@@ -530,7 +530,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "shelia_face_recognition_service.main:app",
+        "face_recognition_service.main:app",
         host=settings.host,
         port=settings.port,
         reload=settings.debug,

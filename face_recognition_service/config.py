@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
 
     # API Settings
-    app_name: str = "Shelia Face Recognition Service"
+    app_name: str = "Face Recognition Service"
     app_version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
     debug: bool = False

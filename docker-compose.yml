@@ -65,15 +65,6 @@ services:
     networks:
       - ${INTERNAL_NETWORK_NAME}
 
-  minecraft-connector:
-    image: alpine
-    container_name: ${CONTAINER_PREFIX:-app}-minecraft-connector
-    command: tail -f /dev/null
-    networks:
-      - ${EXTERNAL_NETWORK_NAME}
-    profiles:
-      - donotstart
-
 networks:
   ${INTERNAL_NETWORK_NAME}:
     driver: bridge

@@ -146,9 +146,8 @@ cloudflare.ini
 *.tmp
 temp/
 tmp/
-docker-compose.yml
-nginx.conf
-
-# Claude Code
 .claude/
-.claude/settings.local.json
+
+# Configuration files that should be customized
+.env
+cloudflare.ini
