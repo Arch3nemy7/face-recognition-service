@@ -1,0 +1,85 @@
+services:
+  certbot:
+    image: certbot/dns-cloudflare
+    container_name: ${CONTAINER_PREFIX:-app}-certbot
+    volumes:
+      - ./nginx/ssl:/etc/letsencrypt
+      - ./nginx/certbot-webroot:/var/www/certbot
+      - ./cloudflare.ini:/cloudflare.ini:ro
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --dns-cloudflare --dns-cloudflare-credentials /cloudflare.ini; sleep 12h & wait $${!}; done;'"
+    networks:
+      - ${INTERNAL_NETWORK_NAME}
+
+  nginx:
+    image: nginx:alpine
+    container_name: ${CONTAINER_PREFIX:-app}-nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/letsencrypt:ro
+      - ./nginx/certbot-webroot:/var/www/certbot:ro
+    depends_on:
+      - face-recognition
+    restart: ${RESTART_POLICY:-unless-stopped}
+    networks:
+      - ${INTERNAL_NETWORK_NAME}
+      - ${EXTERNAL_NETWORK_NAME}
+
+  face-recognition:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${CONTAINER_PREFIX:-app}-face-recognition
+    expose:
+      - "8000"
+    environment:
+      - APP_NAME=${APP_NAME:-Face Recognition Service}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - API_TOKEN=${API_TOKEN:-your-secure-random-token-here-change-this-in-production}
+      - MODEL_NAME=${MODEL_NAME:-buffalo_l}
+      - DETECTION_THRESHOLD=${DETECTION_THRESHOLD:-0.5}
+      - DEVICE=${DEVICE:-cpu}
+      - MAX_IMAGE_SIZE=${MAX_IMAGE_SIZE:-10485760}
+      - CORS_ENABLED=${CORS_ENABLED:-true}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["*"]}
+    volumes:
+      - insightface-models:/app/.insightface
+    restart: ${RESTART_POLICY:-unless-stopped}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '${FACE_RECOGNITION_CPU_LIMIT:-2}'
+          memory: ${FACE_RECOGNITION_MEMORY_LIMIT:-2G}
+        reservations:
+          cpus: '${FACE_RECOGNITION_CPU_RESERVATION:-1}'
+          memory: ${FACE_RECOGNITION_MEMORY_RESERVATION:-1G}
+    networks:
+      - ${INTERNAL_NETWORK_NAME}
+
+  minecraft-connector:
+    image: alpine
+    container_name: ${CONTAINER_PREFIX:-app}-minecraft-connector
+    command: tail -f /dev/null
+    networks:
+      - ${EXTERNAL_NETWORK_NAME}
+    profiles:
+      - donotstart
+
+networks:
+  ${INTERNAL_NETWORK_NAME}:
+    driver: bridge
+  ${EXTERNAL_NETWORK_NAME}:
+    external: true
+
+volumes:
+  insightface-models:
+    driver: local
