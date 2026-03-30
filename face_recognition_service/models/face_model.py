@@ -1,6 +1,7 @@
 """Face recognition model loading and inference using InsightFace."""
 
 import logging
+import os
 from typing import Optional, Tuple
 
 import cv2
@@ -47,9 +48,17 @@ class FaceRecognitionModel:
             logger.info(f"Device: {self.device}")
             logger.info(f"ONNX Runtime providers: {settings.providers}")
 
+            # Resolve InsightFace root — pass explicitly so FaceAnalysis doesn't
+            # fall back to ~/.insightface when INSIGHTFACE_HOME is set
+            insightface_root = os.environ.get(
+                'INSIGHTFACE_HOME',
+                os.path.expanduser('~/.insightface')
+            )
+
             # Initialize FaceAnalysis
             self.model = FaceAnalysis(
                 name=self.model_name,
+                root=insightface_root,
                 providers=settings.providers,
             )
 
@@ -121,6 +130,14 @@ class FaceRecognitionModel:
 
             # Get the face
             face = faces[0]
+
+            # Quality gate: reject low-confidence detections before extracting embedding
+            if hasattr(face, 'det_score') and face.det_score < settings.min_face_quality:
+                raise FaceModelError(
+                    f"Face detection quality too low ({face.det_score:.2f} < {settings.min_face_quality}). "
+                    "Please use a clearer, well-lit photo.",
+                    ErrorCode.NO_FACE_DETECTED
+                )
 
             # Extract embedding
             embedding = face.embedding

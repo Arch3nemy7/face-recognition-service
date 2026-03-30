@@ -2,6 +2,7 @@
 
 import base64
 import io
+import math
 from typing import Optional, Tuple
 
 import cv2
@@ -235,6 +236,40 @@ def validate_image(image: np.ndarray) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def _enhance_image(image: np.ndarray) -> np.ndarray:
+    """
+    Apply CLAHE and auto-gamma correction to improve face recognition accuracy
+    under varying lighting conditions.
+
+    Args:
+        image: BGR image as numpy array
+
+    Returns:
+        Enhanced BGR image
+    """
+    # --- Auto gamma correction ---
+    # Measures mean brightness and corrects toward a neutral 128
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    mean_brightness = float(gray.mean())
+    if mean_brightness > 0:
+        gamma = math.log(128) / math.log(mean_brightness + 1)
+        gamma = max(0.5, min(gamma, 2.5))  # clamp to safe range
+        lut = np.array(
+            [min(255, int(((i / 255.0) ** (1.0 / gamma)) * 255)) for i in range(256)],
+            dtype=np.uint8,
+        )
+        image = cv2.LUT(image, lut)
+
+    # --- CLAHE on the L channel of LAB ---
+    # Improves local contrast without blowing out highlights
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+    image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+    return image
+
+
 def preprocess_image(image: np.ndarray) -> np.ndarray:
     """
     Preprocess an image for face detection.
@@ -261,6 +296,9 @@ def preprocess_image(image: np.ndarray) -> np.ndarray:
         elif image.shape[2] == 4:
             # BGRA to BGR
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+
+        if settings.enhance_image:
+            image = _enhance_image(image)
 
         return image
 

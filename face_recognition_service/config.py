@@ -36,9 +36,12 @@ class Settings(BaseSettings):
     cors_headers: list[str] = ["*"]
 
     # Model Settings
-    model_name: str = "buffalo_l"  # Options: buffalo_l, buffalo_sc
-    detection_threshold: float = 0.5
+    model_name: str = "buffalo_l"  # Options: antelopev2 (best), buffalo_l, buffalo_sc
+    detection_threshold: float = 0.5       # InsightFace det_thresh: minimum score to consider a face detected
+    min_face_quality: float = 0.7          # Minimum det_score to accept embedding (0.5–1.0, higher = stricter quality gate)
     embedding_size: int = 512
+    cosine_match_threshold: float = 0.5   # Lower = stricter. 0.4 conservative, 0.5 recommended, 0.6 permissive
+    euclidean_match_threshold: float = 1.1  # Adjusted proportionally from 1.0
 
     # Device Settings
     device: Literal["cpu", "cuda"] = "cpu"
@@ -47,6 +50,7 @@ class Settings(BaseSettings):
     # Image Processing Settings
     max_image_size: int = 10 * 1024 * 1024  # 10 MB
     allowed_image_formats: set[str] = {"jpg", "jpeg", "png", "bmp", "webp"}
+    enhance_image: bool = True  # Apply CLAHE + auto-gamma correction before face detection
 
     # Performance Settings
     request_timeout: int = 30  # seconds

@@ -379,13 +379,11 @@ async def compare_photos(
         # Convert distance to similarity
         similarity = distance_to_similarity(distance, metric=distance_metric.lower())
 
-        # Determine if it's a match based on typical thresholds
-        # For cosine: distance < 0.4 is typically a good match
-        # For euclidean: distance < 1.0 is typically a good match
+        # Determine if it's a match based on configurable thresholds
         if distance_metric.lower() == "cosine":
-            is_match = distance < 0.4
+            is_match = distance < settings.cosine_match_threshold
         else:  # euclidean
-            is_match = distance < 1.0
+            is_match = distance < settings.euclidean_match_threshold
 
         logger.info(
             f"Comparison complete: match={is_match}, "
@@ -497,9 +495,9 @@ async def compare_photos_upload(
 
         # Determine match
         if request.distance_metric == "cosine":
-            is_match = distance < 0.4
+            is_match = distance < settings.cosine_match_threshold
         else:  # euclidean
-            is_match = distance < 1.0
+            is_match = distance < settings.euclidean_match_threshold
 
         logger.info(
             f"Upload comparison complete: match={is_match}, "
