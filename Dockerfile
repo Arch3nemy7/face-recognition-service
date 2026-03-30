@@ -19,6 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
@@ -31,6 +33,23 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
+
+# Download antelopev2 model pack during build so it's baked into the image.
+# The zip may have a nested folder (antelopev2/antelopev2/*.onnx), so we
+# detect and flatten it to ensure .onnx files sit directly under models/antelopev2/.
+RUN mkdir -p /app/.insightface/models && \
+    curl -L "https://github.com/deepinsight/insightface/releases/download/v0.7/antelopev2.zip" \
+         -o /tmp/antelopev2.zip && \
+    unzip -o /tmp/antelopev2.zip -d /tmp/antelopev2_extract && \
+    if [ -d "/tmp/antelopev2_extract/antelopev2/antelopev2" ]; then \
+        mv /tmp/antelopev2_extract/antelopev2/antelopev2 /app/.insightface/models/antelopev2; \
+    elif [ -d "/tmp/antelopev2_extract/antelopev2" ]; then \
+        mv /tmp/antelopev2_extract/antelopev2 /app/.insightface/models/antelopev2; \
+    else \
+        mkdir -p /app/.insightface/models/antelopev2 && \
+        mv /tmp/antelopev2_extract/*.onnx /app/.insightface/models/antelopev2/; \
+    fi && \
+    rm -rf /tmp/antelopev2.zip /tmp/antelopev2_extract
 
 
 # Stage 2: Runtime
@@ -52,6 +71,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
+
+# Copy pre-downloaded antelopev2 model from builder
+COPY --from=builder /app/.insightface /app/.insightface
 
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
