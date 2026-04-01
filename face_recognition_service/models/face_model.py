@@ -84,6 +84,15 @@ class FaceRecognitionModel:
         """Check if the model is loaded."""
         return self.model is not None
 
+    @staticmethod
+    def _select_best_face(faces):
+        """Select dominant face by det_score × bounding-box area."""
+        def _area(bbox):
+            x1, y1, x2, y2 = bbox
+            return max(0, x2 - x1) * max(0, y2 - y1)
+
+        return max(faces, key=lambda f: f.det_score * _area(f.bbox))
+
     def get_embedding(
         self,
         image: np.ndarray,
@@ -114,30 +123,25 @@ class FaceRecognitionModel:
             # Detect faces
             faces = self.model.get(image)
 
-            # Check number of faces detected
-            if len(faces) == 0:
+            # Filter to faces that meet the quality threshold
+            valid_faces = [
+                f for f in faces
+                if hasattr(f, 'det_score') and f.det_score >= settings.min_face_quality
+            ]
+
+            if not valid_faces:
+                detail = (
+                    f"Best score was {max(f.det_score for f in faces):.2f}"
+                    if faces else "no faces found"
+                )
                 raise FaceModelError(
-                    "No face detected in the image",
+                    f"No face met the quality threshold ({settings.min_face_quality}). {detail}. "
+                    "Please use a clearer, well-lit, close-up photo.",
                     ErrorCode.NO_FACE_DETECTED
                 )
 
-            if len(faces) > 1:
-                raise FaceModelError(
-                    f"Multiple faces detected ({len(faces)}). "
-                    "Please provide an image with a single face.",
-                    ErrorCode.MULTIPLE_FACES_DETECTED
-                )
-
-            # Get the face
-            face = faces[0]
-
-            # Quality gate: reject low-confidence detections before extracting embedding
-            if hasattr(face, 'det_score') and face.det_score < settings.min_face_quality:
-                raise FaceModelError(
-                    f"Face detection quality too low ({face.det_score:.2f} < {settings.min_face_quality}). "
-                    "Please use a clearer, well-lit photo.",
-                    ErrorCode.NO_FACE_DETECTED
-                )
+            # Select the dominant face (highest det_score × face area)
+            face = self._select_best_face(valid_faces)
 
             # Extract embedding
             embedding = face.embedding
