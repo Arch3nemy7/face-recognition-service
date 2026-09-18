@@ -3,7 +3,7 @@
 import base64
 import logging
 from contextlib import asynccontextmanager
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,12 +25,19 @@ from .schemas.api_schemas import (
     CompareResponse,
     EmbedRequest,
     EmbedResponse,
+    ErrorCode,
     ErrorResponse,
     HealthResponse,
     ModelInfoResponse,
 )
 from .utils.embedding_utils import calculate_distance, distance_to_similarity, find_best_match
-from .utils.image_utils import ImageProcessingError, decode_base64_image, fetch_image_from_url, preprocess_image
+from .utils.image_utils import (
+    ImageProcessingError,
+    _redact_url,
+    decode_base64_image,
+    fetch_image_from_url,
+    preprocess_image,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -83,15 +90,59 @@ if settings.cors_enabled:
     )
 
 
+# Error codes that describe a server-side fault rather than a problem with a
+# specific photo. compare-photos never tags these with `image` (see
+# _tag_image_error below), and they get their own HTTP status.
+_SERVER_FAULT_CODES = {
+    ErrorCode.MODEL_NOT_LOADED,
+    ErrorCode.PROCESSING_ERROR,
+    ErrorCode.SERVICE_UNAVAILABLE,
+}
+
+
+def _status_for_error_code(error_code: Optional[str]) -> int:
+    """Map a face-service error code to its HTTP status.
+
+    MODEL_NOT_LOADED and SERVICE_UNAVAILABLE are down dependencies (503) --
+    the latter is a reference fetch that couldn't be reached at all
+    (timeout/DNS/TLS/connection/5xx), as opposed to a definite 4xx on that
+    link (REFERENCE_UNAVAILABLE, still a 400 below). PROCESSING_ERROR and
+    any other unmapped server fault stay 500; every image-specific code is a
+    400 the caller can fix by retaking or replacing the photo.
+    """
+    down_dependency_codes = (
+        ErrorCode.MODEL_NOT_LOADED,
+        ErrorCode.SERVICE_UNAVAILABLE,
+    )
+    if error_code in down_dependency_codes:
+        return status.HTTP_503_SERVICE_UNAVAILABLE
+    if error_code == ErrorCode.PROCESSING_ERROR:
+        return status.HTTP_500_INTERNAL_SERVER_ERROR
+    return status.HTTP_400_BAD_REQUEST
+
+
+def _tag_image_error(
+    exc: "FaceModelError | ImageProcessingError", image: str
+) -> None:
+    """Mark which photo (reference/selfie) an image-specific error came from.
+
+    Server faults are left untagged so a 503/500 is never misread as "your
+    photo is bad".
+    """
+    if exc.error_code not in _SERVER_FAULT_CODES:
+        exc.image = image
+
+
 # Custom exception handler for FaceModelError
 @app.exception_handler(FaceModelError)
 async def face_model_error_handler(request, exc: FaceModelError):
     """Handle FaceModelError exceptions."""
     return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
+        status_code=_status_for_error_code(exc.error_code),
         content=ErrorResponse(
             error=exc.message,
-            error_code=exc.error_code
+            error_code=exc.error_code,
+            image=exc.image,
         ).model_dump(),
     )
 
@@ -101,10 +152,11 @@ async def face_model_error_handler(request, exc: FaceModelError):
 async def image_processing_error_handler(request, exc: ImageProcessingError):
     """Handle ImageProcessingError exceptions."""
     return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
+        status_code=_status_for_error_code(exc.error_code),
         content=ErrorResponse(
             error=exc.message,
-            error_code=exc.error_code
+            error_code=exc.error_code,
+            image=exc.image,
         ).model_dump(),
     )
 
@@ -228,9 +280,12 @@ async def extract_embedding(request: EmbedRequest):
         raise
     except Exception as e:
         logger.error(f"Unexpected error during embedding extraction: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
+        # Route through the same ErrorResponse envelope (and 500 status) as
+        # every other unexpected failure, instead of FastAPI's bare
+        # {"detail": ...}.
+        raise FaceModelError(
+            f"Internal server error: {str(e)}",
+            ErrorCode.PROCESSING_ERROR,
         )
 
 
@@ -351,25 +406,37 @@ async def compare_photos(
                 detail=f"Distance metric must be 'cosine' or 'euclidean', got '{distance_metric}'",
             )
 
-        logger.debug(f"Fetching first image from URL: {image1}")
-        # Fetch and process first image from URL
-        img1 = fetch_image_from_url(image1)
-        img1 = preprocess_image(img1)
-
-        # Get model and extract embedding from first image
+        # Get the model once, before touching either photo, so a down model
+        # is reported as MODEL_NOT_LOADED (image: null) rather than getting
+        # mistaken for a reference-photo problem.
         model = get_model()
-        embedding1, detection_score1 = model.get_embedding(img1, return_detection_info=True)
+
+        logger.debug(f"Fetching first image from URL: {_redact_url(image1)}")
+        try:
+            # Fetch and process first (reference) image from URL, then embed
+            img1 = fetch_image_from_url(image1)
+            img1 = preprocess_image(img1)
+            embedding1, detection_score1 = model.get_embedding(
+                img1, return_detection_info=True
+            )
+        except (FaceModelError, ImageProcessingError) as exc:
+            _tag_image_error(exc, "reference")
+            raise
         logger.debug(f"First image processed (detection score: {detection_score1:.4f})")
 
         logger.debug(f"Reading second image file: {image2.filename}")
-        # Read and process second image from upload
-        image2_bytes = await image2.read()
-        image2_b64 = base64.b64encode(image2_bytes).decode("utf-8")
-        img2 = decode_base64_image(image2_b64)
-        img2 = preprocess_image(img2)
-
-        # Extract embedding from second image
-        embedding2, detection_score2 = model.get_embedding(img2, return_detection_info=True)
+        try:
+            # Read and process second (selfie) image from upload, then embed
+            image2_bytes = await image2.read()
+            image2_b64 = base64.b64encode(image2_bytes).decode("utf-8")
+            img2 = decode_base64_image(image2_b64)
+            img2 = preprocess_image(img2)
+            embedding2, detection_score2 = model.get_embedding(
+                img2, return_detection_info=True
+            )
+        except (FaceModelError, ImageProcessingError) as exc:
+            _tag_image_error(exc, "selfie")
+            raise
         logger.debug(f"Second image processed (detection score: {detection_score2:.4f})")
 
         # Calculate distance between embeddings
@@ -399,14 +466,19 @@ async def compare_photos(
             image2_detection_score=detection_score2,
         )
 
+    except HTTPException:
+        # Request/validation errors raised above (empty URL, bad scheme, bad
+        # distance_metric) keep their own status -- without this, the
+        # `except Exception` below would swallow a 400 into a 500.
+        raise
     except (FaceModelError, ImageProcessingError):
         # These are handled by custom exception handlers
         raise
     except Exception as e:
         logger.error(f"Unexpected error during photo comparison: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
+        raise FaceModelError(
+            f"Internal server error: {str(e)}",
+            ErrorCode.PROCESSING_ERROR,
         )
 
 
@@ -470,20 +542,34 @@ async def compare_photos_upload(
             distance_metric=distance_metric.lower(),
         )
 
-        # Process using the same logic as compare_photos
-        logger.debug("Processing first image...")
-        img1 = decode_base64_image(request.image1)
-        img1 = preprocess_image(img1)
-
+        # Process using the same logic as compare_photos, including the
+        # same reference/selfie image tagging on errors (image1 mirrors the
+        # reference role, image2 the selfie, even though both are uploads
+        # here rather than a URL fetch).
         model = get_model()
-        embedding1, detection_score1 = model.get_embedding(img1, return_detection_info=True)
+
+        logger.debug("Processing first image...")
+        try:
+            img1 = decode_base64_image(request.image1)
+            img1 = preprocess_image(img1)
+            embedding1, detection_score1 = model.get_embedding(
+                img1, return_detection_info=True
+            )
+        except (FaceModelError, ImageProcessingError) as exc:
+            _tag_image_error(exc, "reference")
+            raise
         logger.debug(f"First image processed (detection score: {detection_score1:.4f})")
 
         logger.debug("Processing second image...")
-        img2 = decode_base64_image(request.image2)
-        img2 = preprocess_image(img2)
-
-        embedding2, detection_score2 = model.get_embedding(img2, return_detection_info=True)
+        try:
+            img2 = decode_base64_image(request.image2)
+            img2 = preprocess_image(img2)
+            embedding2, detection_score2 = model.get_embedding(
+                img2, return_detection_info=True
+            )
+        except (FaceModelError, ImageProcessingError) as exc:
+            _tag_image_error(exc, "selfie")
+            raise
         logger.debug(f"Second image processed (detection score: {detection_score2:.4f})")
 
         # Calculate distance
@@ -513,14 +599,19 @@ async def compare_photos_upload(
             image2_detection_score=detection_score2,
         )
 
+    except HTTPException:
+        # Request/validation errors raised above (bad distance_metric) keep
+        # their own status -- without this, `except Exception` below would
+        # swallow a 400 into a 500.
+        raise
     except (FaceModelError, ImageProcessingError):
         # These are handled by custom exception handlers
         raise
     except Exception as e:
         logger.error(f"Unexpected error during upload comparison: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
+        raise FaceModelError(
+            f"Internal server error: {str(e)}",
+            ErrorCode.PROCESSING_ERROR,
         )
 
 

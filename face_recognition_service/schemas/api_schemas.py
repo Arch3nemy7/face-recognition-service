@@ -1,6 +1,6 @@
 """Pydantic schemas for API requests and responses."""
 
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -251,6 +251,16 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error message")
     detail: Optional[str] = Field(None, description="Detailed error information")
     error_code: Optional[str] = Field(None, description="Machine-readable error code")
+    # Which photo an image-specific error is about. Server-side faults
+    # (model not loaded, unexpected processing error) leave this null so a
+    # caller never mistakes "we broke" for "your photo is bad".
+    image: Optional[Literal["reference", "selfie"]] = Field(
+        None,
+        description=(
+            "Which photo the error is about ('reference' or 'selfie'), "
+            "when applicable"
+        ),
+    )
 
 
 # Error codes for standardized error handling
@@ -259,9 +269,17 @@ class ErrorCode:
 
     INVALID_IMAGE = "INVALID_IMAGE"
     NO_FACE_DETECTED = "NO_FACE_DETECTED"
+    FACE_LOW_QUALITY = "FACE_LOW_QUALITY"
     MULTIPLE_FACES_DETECTED = "MULTIPLE_FACES_DETECTED"
     IMAGE_TOO_LARGE = "IMAGE_TOO_LARGE"
     UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
     MODEL_NOT_LOADED = "MODEL_NOT_LOADED"
     INVALID_EMBEDDING = "INVALID_EMBEDDING"
     PROCESSING_ERROR = "PROCESSING_ERROR"
+    REFERENCE_UNAVAILABLE = "REFERENCE_UNAVAILABLE"
+    # The reference URL couldn't even be reached (timeout, DNS, TLS,
+    # connection refused, or the far end's own 5xx) -- a server-side/
+    # upstream fault, not evidence the specific photo/link is bad. Distinct
+    # from REFERENCE_UNAVAILABLE (a definite 4xx on that link), which *is*
+    # the photo's owner's problem to fix with a new reference photo.
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"

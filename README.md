@@ -158,6 +158,7 @@ Extract a 512-dimensional face embedding from an image.
 
 **Error Cases:**
 - No face detected: `error_code: "NO_FACE_DETECTED"`
+- Face(s) found but too low quality: `error_code: "FACE_LOW_QUALITY"`
 - Multiple faces: `error_code: "MULTIPLE_FACES_DETECTED"`
 - Invalid image: `error_code: "INVALID_IMAGE"`
 
@@ -465,19 +466,37 @@ All errors return JSON with standardized format:
 {
   "error": "Human-readable error message",
   "error_code": "MACHINE_READABLE_CODE",
-  "detail": "Optional detailed information"
+  "detail": "Optional detailed information",
+  "image": "reference | selfie | null"
 }
 ```
+
+`image` says which photo an image-specific error is about, on `/compare-photos`
+and `/compare-photos-upload` (`image1` = "reference", `image2` = "selfie").
+It is `null` for server-side faults (`MODEL_NOT_LOADED`, `SERVICE_UNAVAILABLE`,
+`PROCESSING_ERROR`) and on the single-image `/embed` endpoint.
 
 **Error Codes:**
 - `INVALID_IMAGE`: Image decode/format error
 - `NO_FACE_DETECTED`: No face found in image
+- `FACE_LOW_QUALITY`: Face(s) found but none met the quality threshold (blurry, dark, small, or far)
 - `MULTIPLE_FACES_DETECTED`: More than one face found
 - `IMAGE_TOO_LARGE`: Exceeds size limit
 - `UNSUPPORTED_FORMAT`: Invalid image format
-- `MODEL_NOT_LOADED`: Model initialization failed
+- `REFERENCE_UNAVAILABLE`: The reference photo URL (`image1` on `/compare-photos`) itself is bad --
+  a 4xx response (404, 403, 410, ...) from `raise_for_status()`. The photo's owner needs a fresh
+  photo/link. `image: "reference"`. HTTP 400.
+- `SERVICE_UNAVAILABLE`: The reference photo URL couldn't be *reached* at all -- timeout, DNS
+  failure, TLS/connection error, or a 5xx from the far end. This is a fault in the fetch path, not
+  evidence the link or photo is bad, so it is never tagged (`image: null`) and a caller can treat
+  it as a transient outage rather than a bad reference photo. HTTP 503.
+- `MODEL_NOT_LOADED`: Model initialization failed. HTTP 503.
 - `INVALID_EMBEDDING`: Embedding validation failed
-- `PROCESSING_ERROR`: General processing error
+- `PROCESSING_ERROR`: Unexpected server-side processing error. HTTP 500.
+
+Every other error code above is HTTP 400. A request/validation error raised as an
+`HTTPException` (e.g. a malformed `distance_metric`) keeps its own status instead of
+going through this envelope.
 
 ## Limitations and Best Practices
 
