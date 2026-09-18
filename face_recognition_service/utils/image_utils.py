@@ -4,6 +4,7 @@ import base64
 import io
 import math
 from typing import Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 import cv2
 import numpy as np
@@ -14,12 +15,30 @@ from ..config import settings
 from ..schemas.api_schemas import ErrorCode
 
 
+def _redact_url(url: str) -> str:
+    """Strip the query string and fragment from a URL before it's logged or
+    echoed back in an error.
+
+    The reference photo URL (image1 on /compare-photos) is often a signed or
+    presigned link (e.g. cloud storage or a CDN) with its auth embedded in
+    the query string; the raw URL must never reach a client-facing error or
+    a log line.
+    """
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
 class ImageProcessingError(Exception):
     """Base exception for image processing errors."""
 
-    def __init__(self, message: str, error_code: str):
+    def __init__(
+        self, message: str, error_code: str, image: Optional[str] = None
+    ):
         self.message = message
         self.error_code = error_code
+        # Which photo (reference/selfie) this error is about; set by the
+        # endpoint that knows the role, not by this generic utility.
+        self.image = image
         super().__init__(self.message)
 
 
@@ -126,15 +145,51 @@ def fetch_image_from_url(url: str, timeout: int = 30) -> np.ndarray:
         # Convert bytes to numpy array
         return load_image_from_bytes(image_bytes)
 
-    except requests.exceptions.Timeout:
+    except requests.exceptions.HTTPError as e:
+        response = e.response
+        status_code = response.status_code if response is not None else None
+        if status_code is not None and 400 <= status_code < 500:
+            # The reference link itself is bad -- 404 gone, 403 forbidden,
+            # 410 removed, etc. The photo's owner needs a fresh photo/link,
+            # so this is a REFERENCE_UNAVAILABLE the caller can tag
+            # "reference".
+            raise ImageProcessingError(
+                f"Reference URL returned {status_code}: {_redact_url(url)}",
+                ErrorCode.REFERENCE_UNAVAILABLE
+            )
+        # A 5xx (or an HTTPError with no response at all) is the far end's
+        # own outage, not evidence this particular link is broken -- treat
+        # it like the fetch being unreachable (see SERVICE_UNAVAILABLE below),
+        # not like a bad photo.
         raise ImageProcessingError(
-            f"Request timeout while fetching image from URL: {url}",
-            ErrorCode.PROCESSING_ERROR
+            f"Reference URL fetch failed ({_redact_url(url)}): "
+            f"HTTP {status_code}",
+            ErrorCode.SERVICE_UNAVAILABLE
+        )
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        # Timeout, DNS failure, refused connection, and TLS/SSL errors
+        # (requests.exceptions.SSLError subclasses ConnectionError) all mean
+        # the face service's own outbound path is down, not that this
+        # specific reference photo is bad -- so this must never read as "the
+        # reference photo is broken" (image stays null; see
+        # SERVICE_UNAVAILABLE's status mapping in main.py, which routes it
+        # like a real outage).
+        raise ImageProcessingError(
+            f"Reference URL unreachable: {_redact_url(url)}",
+            ErrorCode.SERVICE_UNAVAILABLE
         )
     except requests.exceptions.RequestException as e:
+        # Any other requests-level failure (too many redirects, malformed
+        # URL post-parse, etc.) gets the same "our fetch path failed"
+        # treatment as the two branches above, not a photo-content code.
+        # Uses the exception type rather than str(e): requests embeds the
+        # full requested URL (query string and all) in most of its
+        # exception messages, which would leak a signed URL's auth right
+        # back into this "dev message".
         raise ImageProcessingError(
-            f"Failed to fetch image from URL: {str(e)}",
-            ErrorCode.INVALID_IMAGE
+            f"Failed to fetch image from URL ({_redact_url(url)}): "
+            f"{type(e).__name__}",
+            ErrorCode.SERVICE_UNAVAILABLE
         )
     except Exception as e:
         if isinstance(e, ImageProcessingError):

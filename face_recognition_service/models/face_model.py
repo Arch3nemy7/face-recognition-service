@@ -17,9 +17,14 @@ logger = logging.getLogger(__name__)
 class FaceModelError(Exception):
     """Exception raised for face model errors."""
 
-    def __init__(self, message: str, error_code: str):
+    def __init__(
+        self, message: str, error_code: str, image: Optional[str] = None
+    ):
         self.message = message
         self.error_code = error_code
+        # Which photo (reference/selfie) this error is about; set by the
+        # endpoint that knows the role, not by the model itself.
+        self.image = image
         super().__init__(self.message)
 
 
@@ -111,7 +116,10 @@ class FaceRecognitionModel:
             - detection_score: Confidence score of face detection (0-1), or None
 
         Raises:
-            FaceModelError: If model is not loaded, no face detected, or multiple faces detected
+            FaceModelError: If the model is not loaded (MODEL_NOT_LOADED), no
+                face was found (NO_FACE_DETECTED), a face was found but below
+                the quality threshold (FACE_LOW_QUALITY), or the extracted
+                embedding is invalid (INVALID_EMBEDDING)
         """
         if not self.is_loaded():
             raise FaceModelError(
@@ -130,14 +138,23 @@ class FaceRecognitionModel:
             ]
 
             if not valid_faces:
-                detail = (
-                    f"Best score was {max(f.det_score for f in faces):.2f}"
-                    if faces else "no faces found"
-                )
+                if not faces:
+                    # Nothing detected at all -- distinct from "found a face
+                    # but it's too blurry/dark/small/far" (FACE_LOW_QUALITY
+                    # below), since the two need different user guidance.
+                    raise FaceModelError(
+                        "No face was detected in the image. "
+                        "Please use a clearer, well-lit, close-up photo.",
+                        ErrorCode.NO_FACE_DETECTED
+                    )
+
+                best_score = max(f.det_score for f in faces)
                 raise FaceModelError(
-                    f"No face met the quality threshold ({settings.min_face_quality}). {detail}. "
-                    "Please use a clearer, well-lit, close-up photo.",
-                    ErrorCode.NO_FACE_DETECTED
+                    f"Face(s) detected but none met the quality threshold "
+                    f"({settings.min_face_quality}). Best score was "
+                    f"{best_score:.2f}. Please use a clearer, well-lit, "
+                    "close-up photo.",
+                    ErrorCode.FACE_LOW_QUALITY
                 )
 
             # Select the dominant face (highest det_score × face area)
