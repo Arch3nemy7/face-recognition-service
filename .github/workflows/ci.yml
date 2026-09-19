@@ -50,3 +50,66 @@ jobs:
       # and would auto-skip anyway.
       - name: Offline tests
         run: pytest -q -m "not integration"
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # This compose file also defines nginx/certbot services; only the
+      # face-recognition service image is built here (a plain `docker
+      # build` on the Dockerfile), since the CI runner has no external
+      # proxy network or Cloudflare credentials to bring the rest of the
+      # stack up.
+      - name: Build image
+        run: docker build -t face-svc .
+
+      - name: Smoke-test image imports
+        run: docker run --rm face-svc python -c "import cv2, insightface, onnxruntime; print(cv2.__version__)"
+
+      - name: Run container and wait for healthy
+        run: |
+          docker run -d --rm --name face-svc-ci -p 8000:8000 -e API_TOKEN=ci-token face-svc
+          healthy=false
+          for _ in $(seq 1 60); do
+            if response=$(curl -fs http://localhost:8000/api/v1/health); then
+              echo "$response"
+              if echo "$response" | grep -q '"model_loaded":[[:space:]]*true'; then
+                healthy=true
+                break
+              fi
+            fi
+            sleep 2
+          done
+          if [ "$healthy" != "true" ]; then
+            echo "container did not report 200 with model_loaded=true within 120s"
+            docker logs face-svc-ci
+            docker stop face-svc-ci
+            exit 1
+          fi
+          docker stop face-svc-ci
+
+      # `docker compose config` only renders/validates the compose file; it
+      # doesn't need the external network or nginx/certbot volumes to exist
+      # (that's only required for `up`). API_TOKEN has no fallback
+      # (`${API_TOKEN:?API_TOKEN must be set}` in docker-compose.yml), so
+      # `config` must fail loudly when it's unset -- a non-zero exit here is
+      # the expected, passing outcome. `env -u API_TOKEN` explicitly unsets
+      # the variable, as opposed to `API_TOKEN=` which sets it to an empty
+      # string (`:?` rejects that too, but it's a different case worth
+      # being explicit about).
+      - name: Assert compose refuses to run without API_TOKEN
+        run: |
+          if err=$(env -u API_TOKEN docker compose -f docker-compose.yml config 2>&1 >/dev/null); then
+            echo "expected 'docker compose config' to fail without API_TOKEN, but it succeeded"
+            exit 1
+          fi
+          # Fail for the right reason only: a YAML typo or compose-version
+          # quirk must not pass this check.
+          if ! echo "$err" | grep -q "API_TOKEN must be set"; then
+            echo "docker compose config failed for an unexpected reason: $err"
+            exit 1
+          fi
+          echo "confirmed: docker compose config fails without API_TOKEN set"

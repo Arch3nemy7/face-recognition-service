@@ -42,8 +42,26 @@ htmlcov/
 
 # Development
 requirements-dev.txt
-.env.example
 .editorconfig
+
+# Secrets -- .env holds a real API token and machine-specific thresholds on
+# a developer box; the whole build context (not just what Dockerfile COPYs)
+# is sent to the Docker daemon, so this must be excluded even though no
+# COPY instruction references it. .env.example is a template with no
+# secrets and is kept out of the image only because nothing COPYs it.
+.env
+.env.*
+!.env.example
+
+# Evaluation data, scripts, and outputs -- pseudonymised face dataset and
+# benchmark artifacts; never belong in the image or the build context.
+eval_data/
+eval_out/
+evaluation/
+
+# Planning/agent tooling, not part of the runtime image
+.superpowers/
+.claude/
 
 # CI/CD
 .github/
@@ -56,5 +74,9 @@ Jenkinsfile
 tmp/
 temp/
 
-# Claude Code
-.claude/
+# nginx/certbot deployment assets -- not part of the face-recognition
+# service image; nginx/certbot use their own upstream images.
+nginx/ssl/
+nginx/certbot-webroot/
+cloudflare.ini
+cloudflare.ini.example

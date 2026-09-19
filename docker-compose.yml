@@ -38,15 +38,37 @@ services:
       - APP_NAME=${APP_NAME:-Face Recognition Service}
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - API_TOKEN=${API_TOKEN:-your-secure-random-token-here-change-this-in-production}
-      - MODEL_NAME=${MODEL_NAME:-buffalo_l}
-      - DETECTION_THRESHOLD=${DETECTION_THRESHOLD:-0.5}
+      - API_TOKEN=${API_TOKEN:?API_TOKEN must be set}
+      # antelopev2 is the only pack the Dockerfile bakes into the image
+      # (see Dockerfile's build stage) -- a mismatched default here would
+      # make the container fall through to InsightFace's own
+      # download-from-network logic for whatever pack this names, at
+      # runtime, defeating the point of baking a pack into the image at
+      # all (and running an unvetted pack that was never part of the
+      # image build).
+      - MODEL_NAME=${MODEL_NAME:-antelopev2}
+      # 0.1/0.1, not config.py's conservative library defaults (0.5/0.7):
+      # these are starting points to re-measure against this deployment's
+      # own data (see docs/evaluation.md) before trusting them in
+      # production, not values proven here.
+      - DETECTION_THRESHOLD=${DETECTION_THRESHOLD:-0.1}
+      - MIN_FACE_QUALITY=${MIN_FACE_QUALITY:-0.1}
+      - COSINE_MATCH_THRESHOLD=${COSINE_MATCH_THRESHOLD:-0.5}
+      - ENHANCE_MODE=${ENHANCE_MODE:-detect_fallback}
       - DEVICE=${DEVICE:-cpu}
       - MAX_IMAGE_SIZE=${MAX_IMAGE_SIZE:-10485760}
-      - CORS_ENABLED=${CORS_ENABLED:-true}
+      - MAX_REQUEST_BODY_BYTES=${MAX_REQUEST_BODY_BYTES:-26214400}
+      - CORS_ENABLED=${CORS_ENABLED:-false}
       - CORS_ORIGINS=${CORS_ORIGINS:-["*"]}
-    volumes:
-      - insightface-models:/app/.insightface
+      - REFERENCE_URL_ALLOWED_HOSTS=${REFERENCE_URL_ALLOWED_HOSTS:-[]}
+      - REFERENCE_URL_ALLOW_PRIVATE=${REFERENCE_URL_ALLOW_PRIVATE:-true}
+      - MAX_CONCURRENT_INFERENCE=${MAX_CONCURRENT_INFERENCE:-1}
+      - INFERENCE_QUEUE_TIMEOUT=${INFERENCE_QUEUE_TIMEOUT:-20}
+      # Match the `cpus: 2` limit below -- ONNX Runtime's own thread pool
+      # otherwise sizes itself from host cores, which is wrong inside a
+      # CPU-limited container.
+      - ORT_INTRA_OP_THREADS=${ORT_INTRA_OP_THREADS:-2}
+      - ORT_INTER_OP_THREADS=${ORT_INTER_OP_THREADS:-1}
     restart: ${RESTART_POLICY:-unless-stopped}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
@@ -70,7 +92,3 @@ networks:
     driver: bridge
   ${EXTERNAL_NETWORK_NAME}:
     external: true
-
-volumes:
-  insightface-models:
-    driver: local
