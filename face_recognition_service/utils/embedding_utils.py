@@ -1,5 +1,6 @@
 """Embedding distance calculation and comparison utilities."""
 
+import math
 from typing import List, Tuple
 
 import numpy as np
@@ -55,18 +56,36 @@ def cosine_distance(embedding1: np.ndarray, embedding2: np.ndarray) -> float:
 
 def euclidean_distance(embedding1: np.ndarray, embedding2: np.ndarray) -> float:
     """
-    Calculate Euclidean (L2) distance between two embeddings.
+    Euclidean (L2) distance between the unit-normalised embeddings.
 
-    Args:
-        embedding1: First embedding vector
-        embedding2: Second embedding vector
-
-    Returns:
-        Euclidean distance as float
+    Normalising first makes the distance depend only on the angle between the
+    embeddings (raw InsightFace vectors have norms of ~9-30), so on unit
+    vectors d_euclidean = sqrt(2 * d_cosine) and both metrics can share one
+    threshold -- see euclidean_threshold_for.
     """
-    diff = embedding1 - embedding2
-    distance = np.linalg.norm(diff)
-    return float(distance)
+    diff = normalize_embedding(np.asarray(embedding1, dtype=np.float64)) - normalize_embedding(
+        np.asarray(embedding2, dtype=np.float64)
+    )
+    return float(np.linalg.norm(diff))
+
+
+def cosine_similarity(embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+    """Cosine similarity in [-1, 1] (1 = same direction)."""
+    return 1.0 - cosine_distance(embedding1, embedding2)
+
+
+def euclidean_threshold_for(cosine_threshold: float) -> float:
+    """The euclidean threshold that makes the same decision as a cosine one on unit vectors."""
+    return math.sqrt(2.0 * cosine_threshold)
+
+
+def match_threshold(metric: str, cosine_threshold: float) -> float:
+    """Distance threshold for `metric`, derived from the single configured cosine threshold."""
+    if metric == "cosine":
+        return cosine_threshold
+    if metric == "euclidean":
+        return euclidean_threshold_for(cosine_threshold)
+    raise ValueError(f"Unsupported distance metric: {metric}")
 
 
 def calculate_distance(
@@ -130,49 +149,20 @@ def find_best_match(
     metric: str = "cosine"
 ) -> Tuple[List[MatchResult], MatchResult]:
     """
-    Find the best matching reference embedding for a query embedding.
+    Rank reference embeddings by distance to the query (closest first).
 
-    Args:
-        query_embedding: Query embedding vector (512-dimensional list)
-        reference_embeddings: List of reference embeddings with IDs
-        metric: Distance metric to use ('cosine' or 'euclidean')
-
-    Returns:
-        Tuple of (all_matches, best_match) where:
-        - all_matches: List of all MatchResult objects sorted by distance (ascending)
-        - best_match: The best matching MatchResult (lowest distance)
+    Returns (all matches sorted ascending by distance, the closest match).
+    No threshold is applied here; callers decide what counts as a match.
     """
-    # Convert query embedding to numpy array
-    query_array = np.array(query_embedding, dtype=np.float32)
-
-    # Calculate distances to all references
-    matches: List[MatchResult] = []
-
-    for ref in reference_embeddings:
-        # Convert reference embedding to numpy array
-        ref_array = np.array(ref.embedding, dtype=np.float32)
-
-        # Calculate distance
-        distance = calculate_distance(query_array, ref_array, metric=metric)
-
-        # Convert to similarity
-        similarity = distance_to_similarity(distance, metric=metric)
-
-        # Create match result
-        match = MatchResult(
-            id=ref.id,
-            distance=distance,
-            similarity=similarity
-        )
-        matches.append(match)
-
-    # Sort by distance (ascending - lower is better)
-    matches.sort(key=lambda x: x.distance)
-
-    # Best match is the first one (lowest distance)
-    best_match = matches[0]
-
-    return matches, best_match
+    query = np.asarray(query_embedding, dtype=np.float64)
+    refs = np.asarray([ref.embedding for ref in reference_embeddings], dtype=np.float64)
+    distances = batch_calculate_distances(query, refs, metric=metric)
+    matches = [
+        MatchResult(id=ref.id, distance=float(d), similarity=distance_to_similarity(float(d), metric=metric))
+        for ref, d in zip(reference_embeddings, distances, strict=True)
+    ]
+    matches.sort(key=lambda m: m.distance)
+    return matches, matches[0]
 
 
 def batch_calculate_distances(
@@ -181,38 +171,26 @@ def batch_calculate_distances(
     metric: str = "cosine"
 ) -> np.ndarray:
     """
-    Calculate distances between one query and multiple reference embeddings efficiently.
+    Distances from one query to many references, each row normalised on its own.
 
     Args:
-        query_embedding: Query embedding (1D array of shape [embedding_dim])
-        reference_embeddings: Reference embeddings (2D array of shape [num_refs, embedding_dim])
-        metric: Distance metric ('cosine' or 'euclidean')
+        query_embedding: 1-D array [embedding_dim]
+        reference_embeddings: 2-D array [num_refs, embedding_dim]
+        metric: 'cosine' or 'euclidean'
 
     Returns:
-        Array of distances (1D array of shape [num_refs])
+        1-D array [num_refs]
     """
+    query = normalize_embedding(np.asarray(query_embedding, dtype=np.float64))
+    refs = np.asarray(reference_embeddings, dtype=np.float64)
+    norms = np.linalg.norm(refs, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    refs = refs / norms
     if metric == "cosine":
-        # Normalize embeddings
-        query_norm = normalize_embedding(query_embedding)
-        refs_norm = normalize_embedding(reference_embeddings)
-
-        # Calculate cosine similarities (vectorized)
-        cosine_sims = np.dot(refs_norm, query_norm)
-
-        # Convert to distances
-        distances = 1.0 - cosine_sims
-
-        return distances
-
-    elif metric == "euclidean":
-        # Calculate Euclidean distances (vectorized)
-        diffs = reference_embeddings - query_embedding
-        distances = np.linalg.norm(diffs, axis=1)
-
-        return distances
-
-    else:
-        raise ValueError(f"Unsupported distance metric: {metric}")
+        return 1.0 - np.clip(refs @ query, -1.0, 1.0)
+    if metric == "euclidean":
+        return np.linalg.norm(refs - query, axis=1)
+    raise ValueError(f"Unsupported distance metric: {metric}")
 
 
 def is_valid_embedding(embedding: List[float], expected_size: int = 512) -> bool:

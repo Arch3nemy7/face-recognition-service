@@ -1,7 +1,8 @@
 """Pydantic schemas for API requests and responses."""
 
-from typing import Literal, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import Literal, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class EmbedRequest(BaseModel):
@@ -22,6 +23,39 @@ class EmbedRequest(BaseModel):
         return v.strip()
 
 
+class FaceQualityResponse(BaseModel):
+    """Quality metrics for the chosen face. Always informational: reported
+    regardless of whether any quality gate is enabled, and gates default off
+    (see README). Landmark-based fields are null when the face has no
+    detected landmarks."""
+
+    face_size_px: Optional[float] = Field(
+        None, description="Shorter side of the face bounding box, in pixels"
+    )
+    interocular_px: Optional[float] = Field(
+        None, description="Distance between the two eye landmarks, in pixels"
+    )
+    roll_deg: Optional[float] = Field(
+        None, description="In-plane head tilt, in degrees (0 = level)"
+    )
+    yaw_proxy: Optional[float] = Field(
+        None, description="Left/right head-turn proxy; ~0 is frontal, sign gives direction"
+    )
+    blur_variance: Optional[float] = Field(
+        None, description="Laplacian variance of the aligned face crop; lower means blurrier"
+    )
+    embedding_norm: Optional[float] = Field(
+        None, description="L2 norm of the raw embedding, before unit normalisation"
+    )
+    faces_considered: Optional[int] = Field(
+        None, description="Number of detected faces meeting the detector's quality threshold"
+    )
+    second_face_ratio: Optional[float] = Field(
+        None,
+        description="Area of the next-largest qualifying face relative to the chosen face's area; 0 if none",
+    )
+
+
 class EmbedResponse(BaseModel):
     """Response schema for face embedding extraction."""
 
@@ -40,6 +74,10 @@ class EmbedResponse(BaseModel):
         description="Confidence score of face detection (0-1)",
         ge=0.0,
         le=1.0
+    )
+    quality: Optional[FaceQualityResponse] = Field(
+        None,
+        description="Informational face quality metrics for the detected face",
     )
 
 
@@ -120,6 +158,8 @@ class CompareResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Response schema for health check."""
+
+    model_config = ConfigDict(protected_namespaces=())
 
     status: str = Field(..., description="Service status: 'healthy' or 'unhealthy'")
     model_loaded: bool = Field(..., description="Whether the model is loaded")
@@ -231,6 +271,17 @@ class ComparePhotosResponse(BaseModel):
         ...,
         description="The distance metric used for comparison"
     )
+    threshold: Optional[float] = Field(
+        None,
+        description="Distance threshold used for `match`, in the units of `distance_metric`; "
+        "the photos match when distance < threshold",
+    )
+    cosine_similarity: Optional[float] = Field(
+        None,
+        ge=-1.0,
+        le=1.0,
+        description="Raw cosine similarity of the two face embeddings (-1..1), independent of distance_metric",
+    )
     image1_detection_score: Optional[float] = Field(
         None,
         description="Face detection confidence for first image (0-1)",
@@ -243,23 +294,28 @@ class ComparePhotosResponse(BaseModel):
         ge=0.0,
         le=1.0
     )
+    image1_quality: Optional[FaceQualityResponse] = Field(
+        None,
+        description="Informational face quality metrics for the first (reference) image",
+    )
+    image2_quality: Optional[FaceQualityResponse] = Field(
+        None,
+        description="Informational face quality metrics for the second (selfie) image",
+    )
 
 
 class ErrorResponse(BaseModel):
     """Response schema for errors."""
 
     error: str = Field(..., description="Error message")
-    detail: Optional[str] = Field(None, description="Detailed error information")
+    detail: Optional[Union[str, list]] = Field(None, description="Detailed error information")
     error_code: Optional[str] = Field(None, description="Machine-readable error code")
     # Which photo an image-specific error is about. Server-side faults
     # (model not loaded, unexpected processing error) leave this null so a
     # caller never mistakes "we broke" for "your photo is bad".
     image: Optional[Literal["reference", "selfie"]] = Field(
         None,
-        description=(
-            "Which photo the error is about ('reference' or 'selfie'), "
-            "when applicable"
-        ),
+        description="Which photo the error is about ('reference' or 'selfie'), when applicable",
     )
 
 
@@ -281,5 +337,28 @@ class ErrorCode:
     # connection refused, or the far end's own 5xx) -- a server-side/
     # upstream fault, not evidence the specific photo/link is bad. Distinct
     # from REFERENCE_UNAVAILABLE (a definite 4xx on that link), which *is*
-    # the photo's owner's problem to fix with a new reference photo.
+    # the enrolled person's problem to fix via a new reference photo.
     SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+    # The bounded inference queue (concurrency.InferenceGate) timed out
+    # waiting for a free slot -- the service is up but saturated. Distinct
+    # from SERVICE_UNAVAILABLE (a downstream fetch failure): this is our own
+    # capacity, not a dependency.
+    SERVICE_BUSY = "SERVICE_BUSY"
+    # The reference URL's host (or a redirect target's host) failed the
+    # host/IP policy: not on a non-empty allowlist, or resolved to an
+    # always-blocked address (link-local/multicast/unspecified/reserved) or,
+    # with REFERENCE_URL_ALLOW_PRIVATE=false, a private/loopback one. Left
+    # untagged like SERVICE_UNAVAILABLE (see main._UNTAGGED_CODES) -- the
+    # backend shows both as a plain outage, which is correct whether this is
+    # a config mismatch or someone probing internal addresses.
+    REFERENCE_URL_NOT_ALLOWED = "REFERENCE_URL_NOT_ALLOWED"
+
+    # Generic HTTP-layer codes, produced by the catch-all exception handlers
+    # in main.py rather than raised directly by model/image-processing code.
+    INVALID_REQUEST = "INVALID_REQUEST"
+    UNAUTHORIZED = "UNAUTHORIZED"
+    FORBIDDEN = "FORBIDDEN"
+    NOT_FOUND = "NOT_FOUND"
+    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    HTTP_ERROR = "HTTP_ERROR"  # any other HTTPException status
