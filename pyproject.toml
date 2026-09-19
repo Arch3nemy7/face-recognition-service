@@ -1,0 +1,28 @@
+# Tool configuration only. The service is installed from requirements.txt
+# and run as a module; it is not built or published as a package.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: loads the real InsightFace model; auto-skipped when the model files are absent",
+]
+
+[tool.ruff]
+target-version = "py311"
+# Worktrees live under .claude/worktrees/ in the main checkout.
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+# Line length is not enforced: a repo-wide reformat would break the
+# line-by-line hand sync with the template repo.
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's parameter declarations are meant to be used as defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]
+
+[tool.mypy]
+python_version = "3.11"
+# insightface, cv2 and onnxruntime ship without type information.
+ignore_missing_imports = true

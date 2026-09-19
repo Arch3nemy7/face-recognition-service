@@ -1,20 +1,30 @@
 # FastAPI and ASGI server
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
 
 # Data validation
-pydantic==2.5.3
-pydantic-settings==2.1.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
 
 # Face recognition (InsightFace with ArcFace)
+# insightface, onnxruntime and numpy are pinned exactly and must not be
+# bumped independently: every accuracy/threshold number in
+# docs/evaluation.md (the calibration this service ships with) was measured
+# against this exact trio. Bumping any one of them would invalidate those
+# measurements without a full re-run of the eval suite against real and
+# LFW data.
 insightface==0.7.3
 onnxruntime==1.17.3
+numpy<2.0,>=1.26.0
 
 # Image processing
-opencv-python>=4.10.0
-numpy<2.0,>=1.26.0
+# opencv-python-headless (not opencv-python): this service is headless
+# (no GUI/imshow use), and the headless wheel avoids pulling in GL/X11
+# runtime libraries the container doesn't need. Only one of the two may be
+# installed at a time -- both wheels write the same cv2/ directory.
+opencv-python-headless>=4.10,<5
 Pillow>=10.2.0
 
 # HTTP utilities
-python-multipart==0.0.6
+python-multipart==0.0.32
 requests>=2.31.0

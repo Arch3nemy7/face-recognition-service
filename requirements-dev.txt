@@ -2,14 +2,12 @@
 -r requirements.txt
 
 # Testing
-pytest==7.4.4
-pytest-asyncio==0.23.3
-httpx==0.26.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1
 
 # Code quality
-black==24.1.1
-isort==5.13.2
-flake8==7.0.0
+ruff==0.6.9
 mypy==1.8.0
 
 # Development utilities
