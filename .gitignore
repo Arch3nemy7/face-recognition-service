@@ -148,6 +148,11 @@ temp/
 tmp/
 .claude/
 
+# Evaluation harness data/output (biometric templates; see docs/evaluation.md)
+eval_data/
+eval_out/
+.eval_cache/
+
 # Configuration files that should be customized
 .env
 cloudflare.ini
