@@ -49,11 +49,16 @@ what changes for production.
   `{{DOMAIN_NAME}}` placeholder in `nginx/nginx.conf` by hand with the same
   value (nginx does not read `.env`; see §4 below).
 - **`LETSENCRYPT_EMAIL`** -- contact address for Let's Encrypt certificate
-  notifications.
+  notifications. Nothing in `docker-compose.yml` or the running containers
+  reads this variable automatically; it's used as the `--email` value you
+  pass by hand to the one-shot certificate-issuance command in §4.
 - **`CLOUDFLARE_API_TOKEN`** -- copy `cloudflare.ini.example` to
   `cloudflare.ini` (kept out of git; `chmod 600` it) and paste the same
   token in as `dns_cloudflare_api_token`. Certbot reads `cloudflare.ini`
-  directly, not this environment variable, for the actual DNS-01 challenge.
+  directly, not this environment variable, for the actual DNS-01 challenge
+  -- this `.env` copy of the token exists only so you have one place to
+  keep it alongside the rest of your production values; nothing consumes
+  it from the environment.
 
 ### Recommended production values -- starting points to re-measure
 
@@ -159,20 +164,55 @@ path: `MAX_CONCURRENT_INFERENCE` (default `1`) and `INFERENCE_QUEUE_TIMEOUT`
    chmod 600 cloudflare.ini
    ```
    `cloudflare.ini` must never be committed -- it holds a live credential.
-4. Bring the stack up (see "Deploy" below) and watch the `certbot`
-   container issue the first certificate:
+4. **Issue the first certificate before bringing `nginx` up.** The
+   `certbot` service's own entrypoint only *renews* an already-issued
+   certificate (`certbot renew`, looped every 12 hours) -- against the
+   empty `./nginx/ssl` a fresh clone starts with, `renew` finds nothing to
+   renew and does nothing. `nginx`'s `ssl_certificate`/`ssl_certificate_key`
+   paths won't exist yet either way, so if you bring the full stack up
+   first, `nginx` will fail to start (and keep crash-looping under its
+   `restart:` policy) until a certificate actually exists. Issue it
+   one-shot, with `docker compose run` overriding the service's default
+   entrypoint to invoke `certbot certonly` directly instead:
    ```bash
-   docker compose logs -f certbot
+   docker compose run --rm --entrypoint certbot certbot \
+     certonly --dns-cloudflare \
+     --dns-cloudflare-credentials /cloudflare.ini \
+     -d "$DOMAIN_NAME" \
+     --email "$LETSENCRYPT_EMAIL" \
+     --agree-tos -n
    ```
-   Certbot creates a DNS TXT record via the Cloudflare API, waits for
-   propagation (tens of seconds, typically), and Let's Encrypt validates it
-   -- usually done within a few minutes. `certbot`'s entrypoint loops
-   `certbot renew` every 12 hours afterward, so renewal is automatic; no
-   cron job is needed.
+   (export `DOMAIN_NAME` and `LETSENCRYPT_EMAIL` from your `.env` first,
+   e.g. `set -a; source .env; set +a`, or substitute the literal values
+   directly in the command above.) This uses the same `./nginx/ssl` and
+   `cloudflare.ini` mounts already declared on the `certbot` service in
+   `docker-compose.yml` -- `docker compose run` only overrides the
+   entrypoint/command, not the volumes/networks. Certbot creates a DNS TXT
+   record via the Cloudflare API, waits for propagation (tens of seconds,
+   typically), and Let's Encrypt validates it -- usually done within a few
+   minutes. The certificate lands under `./nginx/ssl/live/<domain>/`,
+   which `nginx`'s config already points at.
+5. *Now* bring the full stack up (see "Deploy" below). `certbot`'s normal
+   entrypoint takes over from here, looping `certbot renew` every 12 hours
+   -- a no-op renewal attempt until the certificate is within its renewal
+   window, then automatic from there. No cron job is needed for renewal
+   itself, but nothing in this stack reloads `nginx` after a renewal
+   replaces the certificate files on disk -- `nginx` will keep serving the
+   old certificate from memory until it's restarted. After any renewal
+   (check `docker compose logs certbot` for "Congratulations" or
+   "renewed"), reload it manually:
+   ```bash
+   docker compose exec nginx nginx -s reload
+   ```
+   A 90-day Let's Encrypt certificate renews roughly every 60 days, so a
+   periodic manual check (or your own external cron hitting the command
+   above) is enough in practice; this repo doesn't wire up anything more
+   automatic than that, to avoid giving the `certbot` container access to
+   the Docker socket it would need to restart `nginx` itself.
 
 `nginx`'s `server_name {{DOMAIN_NAME}}` line will fail to match anything
 useful until step 1 is done, so complete the domain substitution before
-the first `docker compose up`.
+issuing the first certificate.
 
 ## 5. Deploy / update / rollback
 
@@ -375,7 +415,7 @@ HTTP status, whether it's tagged with which photo (`image: "reference"` /
 | `PROCESSING_ERROR` | 500 | none | Unexpected server-side fault. | Check `docker compose logs face-recognition` and the request's `X-Request-ID` for the stack trace. |
 | `UNAUTHORIZED` | 401 | none | Missing/invalid bearer token -- `API_TOKEN` mismatch between this service and the caller. | Re-sync `API_TOKEN` on both sides after any rotation. |
 | `INVALID_REQUEST` / `VALIDATION_ERROR` | 400 / 422 | none | A malformed request the router itself rejects before reaching face-processing code -- missing required multipart field, wrong `distance_metric` value, wrong content type, etc. | Usually a caller-side integration bug (a field renamed/dropped) rather than a runtime fault; check the request actually sent against `face_recognition_service/main.py`'s route signatures. |
-| Plain `413` from nginx (not this service) | 413 | n/a | `nginx/nginx.conf`'s `client_max_body_size` (25M) is smaller than the request. | Not a code this service ever emits -- raise `client_max_body_size` together with `MAX_REQUEST_BODY_BYTES` if you ever increase the latter. If you see this, nginx is rejecting before this service's own `MAX_REQUEST_BODY_BYTES` 400 gets a chance to. |
+| Plain `413` from nginx (not this service) | 413 | n/a | `nginx/nginx.conf`'s `client_max_body_size` (32M) is smaller than the request. | Not a code this service ever emits -- raise `client_max_body_size` together with `MAX_REQUEST_BODY_BYTES` if you ever increase the latter, keeping nginx's cap **strictly above** the app's (they must not be set equal -- see the comment in `nginx/nginx.conf`). If you see this, nginx is rejecting before this service's own `MAX_REQUEST_BODY_BYTES` 400 gets a chance to. |
 
 **Health check returns 503 right after a deploy**: expected until the model
 finishes loading (§5); if it stays 503 past the ~60s `start_period`, check

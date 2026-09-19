@@ -1,14 +1,20 @@
 services:
+  # NOTE: this service only *renews* an already-issued certificate -- its
+  # entrypoint loops `certbot renew`, which is a no-op against an empty
+  # ./nginx/ssl on a fresh clone. Run the one-shot issuance command in
+  # DEPLOYMENT_GUIDE.md §4 BEFORE the first `docker compose up`, or nginx
+  # (below) will crash-loop looking for a certificate that doesn't exist
+  # yet.
   certbot:
     image: certbot/dns-cloudflare
     container_name: ${CONTAINER_PREFIX:-app}-certbot
     volumes:
       - ./nginx/ssl:/etc/letsencrypt
-      - ./nginx/certbot-webroot:/var/www/certbot
       - ./cloudflare.ini:/cloudflare.ini:ro
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --dns-cloudflare --dns-cloudflare-credentials /cloudflare.ini; sleep 12h & wait $${!}; done;'"
+    restart: ${RESTART_POLICY:-unless-stopped}
     networks:
-      - ${INTERNAL_NETWORK_NAME}
+      - ${INTERNAL_NETWORK_NAME:-face-recognition-network}
 
   nginx:
     image: nginx:alpine
@@ -19,13 +25,12 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/letsencrypt:ro
-      - ./nginx/certbot-webroot:/var/www/certbot:ro
     depends_on:
       - face-recognition
     restart: ${RESTART_POLICY:-unless-stopped}
     networks:
-      - ${INTERNAL_NETWORK_NAME}
-      - ${EXTERNAL_NETWORK_NAME}
+      - ${INTERNAL_NETWORK_NAME:-face-recognition-network}
+      - ${EXTERNAL_NETWORK_NAME:-proxy-network}
 
   face-recognition:
     build:
@@ -85,10 +90,10 @@ services:
           cpus: '${FACE_RECOGNITION_CPU_RESERVATION:-1}'
           memory: ${FACE_RECOGNITION_MEMORY_RESERVATION:-1G}
     networks:
-      - ${INTERNAL_NETWORK_NAME}
+      - ${INTERNAL_NETWORK_NAME:-face-recognition-network}
 
 networks:
-  ${INTERNAL_NETWORK_NAME}:
+  ${INTERNAL_NETWORK_NAME:-face-recognition-network}:
     driver: bridge
-  ${EXTERNAL_NETWORK_NAME}:
+  ${EXTERNAL_NETWORK_NAME:-proxy-network}:
     external: true

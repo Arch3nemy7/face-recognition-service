@@ -113,3 +113,17 @@ jobs:
             exit 1
           fi
           echo "confirmed: docker compose config fails without API_TOKEN set"
+
+      # The check above only proves compose fails *without* API_TOKEN --
+      # it says nothing about whether the file is otherwise well-formed. A
+      # positive render, with every substituted variable actually set,
+      # catches a typo'd variable reference, a bad network name, or any
+      # other rendering error the negative check above can't see (a
+      # missing API_TOKEN would mask any other error the same way).
+      - name: Assert compose renders successfully with required variables set
+        run: |
+          API_TOKEN=ci-token \
+          INTERNAL_NETWORK_NAME=internal \
+          EXTERNAL_NETWORK_NAME=proxy \
+            docker compose -f docker-compose.yml config >/dev/null
+          echo "confirmed: docker compose config renders with API_TOKEN/network vars set"

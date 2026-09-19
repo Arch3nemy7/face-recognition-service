@@ -438,7 +438,7 @@ commentary.
 | `DEVICE` | `cpu` | `cpu` or `cuda`. |
 | `PROVIDERS` | *(derived from `DEVICE`)* | JSON array of ONNX Runtime providers; overrides `DEVICE`-derived defaults when set. |
 | `MAX_IMAGE_SIZE` | `10485760` | Max encoded image size in bytes (10 MB). |
-| `MAX_REQUEST_BODY_BYTES` | `26214400` | Hard cap on the whole request body (25 MB), enforced by ASGI middleware before any route runs. Must exceed two images plus base64/multipart overhead. Enforced before authentication, so an oversize request is rejected without needing a valid token -- only the size limit itself is revealed to an unauthenticated caller, nothing about the image/model. `nginx/nginx.conf`'s `client_max_body_size` is set to `25M` to match; keep both in sync if you raise this. |
+| `MAX_REQUEST_BODY_BYTES` | `26214400` | Hard cap on the whole request body (25 MB), enforced by ASGI middleware before any route runs. Must exceed two images plus base64/multipart overhead. Enforced before authentication, so an oversize request is rejected without needing a valid token -- only the size limit itself is revealed to an unauthenticated caller, nothing about the image/model. `nginx/nginx.conf`'s `client_max_body_size` is set to `32M`, strictly above this default (both reject on strictly-greater-than, so an equal cap would let nginx's opaque 413 fire first) -- keep nginx's cap strictly larger if you raise this. |
 | `MAX_IMAGE_PIXELS` | `50000000` | Max decoded width×height, checked from the header before decoding. |
 | `MAX_IMAGE_SIDE` | `2048` | Downscale so the longer side is at most this many pixels (`0` = keep original size). |
 | `ALLOWED_IMAGE_FORMATS` | `["jpg","jpeg","png","bmp","webp","mpo"]` | JSON array of accepted image formats. |
@@ -620,11 +620,14 @@ ports 80/443 published). It requires `API_TOKEN` in the environment or a
 ```bash
 cp .env.example .env
 # edit .env: set API_TOKEN, DOMAIN_NAME, LETSENCRYPT_EMAIL, CLOUDFLARE_API_TOKEN at minimum
+# then issue the first TLS certificate BEFORE `up` -- see DEPLOYMENT_GUIDE.md §4,
+# nginx will crash-loop without one on a fresh clone
 API_TOKEN=<your-token> docker compose up -d
 ```
 
 See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for the complete procedure,
-including the Cloudflare/certbot setup and nginx domain substitution.
+including the Cloudflare/certbot setup, the one-shot certificate issuance
+step, and nginx domain substitution.
 
 ## Performance Tuning
 
