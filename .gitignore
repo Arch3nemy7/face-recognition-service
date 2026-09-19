@@ -148,6 +148,12 @@ temp/
 tmp/
 .claude/
 
+# Internal planning/process artifacts -- these reference the private
+# source repo, its path on the maintainer's machine, and other
+# non-shareable internal context; never meant to ship in this template.
+.superpowers/
+docs/superpowers/
+
 # Evaluation harness data/output (biometric templates; see docs/evaluation.md)
 eval_data/
 eval_out/
