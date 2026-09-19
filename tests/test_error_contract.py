@@ -1,19 +1,19 @@
-"""Mocked contract tests for face-service error responses.
+"""Mocked contract tests for face-service error responses (Task 1).
 
 Unlike tests/test_api.py, this suite never loads InsightFace: the model
-singleton, `fetch_image_from_url` and `decode_base64_image` are stubbed so it
-runs fully offline. It exercises every row of the error contract -- the split
-between NO_FACE_DETECTED and FACE_LOW_QUALITY, the reference/selfie `image`
-tag on compare-photos, REFERENCE_UNAVAILABLE vs SERVICE_UNAVAILABLE for a bad
-vs unreachable reference URL, the MODEL_NOT_LOADED/PROCESSING_ERROR status
-codes, and the HTTPException status bug (a 400 raised inside `try` must not
-become a 500).
+singleton, `fetch_image_from_url`, `decode_base64_image` (/embed) and
+`decode_image_bytes` (upload paths) are stubbed so it runs fully offline. It exercises every row of the error contract in
+.superpowers/sdd/face-errors-tasks/global-constraints.md -- the split between
+NO_FACE_DETECTED and FACE_LOW_QUALITY, the reference/selfie `image` tag on
+compare-photos, REFERENCE_UNAVAILABLE for an unreachable reference URL, the
+MODEL_NOT_LOADED/PROCESSING_ERROR status codes, and the HTTPException status
+bug (a 400 raised inside `try` must not become a 500).
 """
 
 from __future__ import annotations
 
+import traceback
 from types import SimpleNamespace
-from typing import Generator
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -25,10 +25,17 @@ from httpx import Response
 import face_recognition_service.main as main_module
 from face_recognition_service.config import settings
 from face_recognition_service.models import face_model as face_model_module
-from face_recognition_service.models.face_model import FaceModelError, FaceRecognitionModel
+from face_recognition_service.models.face_model import (
+    FaceModelError,
+    FaceRecognitionModel,
+)
 from face_recognition_service.schemas.api_schemas import ErrorCode
 from face_recognition_service.utils import image_utils as image_utils_module
-from face_recognition_service.utils.image_utils import ImageProcessingError, fetch_image_from_url
+from face_recognition_service.utils.image_utils import (
+    ImageProcessingError,
+    fetch_image_from_url,
+)
+from tests.conftest import _face_result
 
 AUTH_HEADERS = {"Authorization": f"Bearer {settings.api_token}"}
 DUMMY_IMAGE = np.zeros((64, 64, 3), dtype=np.uint8)
@@ -49,13 +56,16 @@ class _FakeFace:
     def __init__(self, det_score: float, embedding: np.ndarray | None = None) -> None:
         self.det_score = det_score
         self.bbox = (0.0, 0.0, 10.0, 10.0)
+        self.kps = None
         self.embedding = embedding if embedding is not None else np.ones(512, dtype=np.float32)
 
 
 def _model_with_faces(faces: list) -> FaceRecognitionModel:
-    """A loaded FaceRecognitionModel whose InsightFace `.get()` call is stubbed."""
+    """A loaded FaceRecognitionModel whose detector and recognizer are stubbed."""
     model = FaceRecognitionModel()
-    model.model = SimpleNamespace(get=lambda image: faces)
+    model.model = SimpleNamespace()  # anything non-None counts as loaded
+    model._detect = lambda image: faces
+    model._embed = lambda image, face: face.embedding
     return model
 
 
@@ -96,8 +106,8 @@ class TestGetEmbeddingQualitySplit:
 
 # ---------------------------------------------------------------------------
 # fetch_image_from_url: a signed reference URL's query string (auth) must
-# never come back in the client-facing error, since the reference photo URL
-# is frequently a presigned link carrying its own credentials.
+# never come back in the client-facing error, since the reference photo URL is
+# frequently a presigned link carrying its own credentials.
 # ---------------------------------------------------------------------------
 
 
@@ -116,9 +126,9 @@ class _FakeResponse:
 class TestFetchImageFromUrlRedactsSignedQueryString:
     """The dev-facing `error` message must drop the URL's query string."""
 
-    SIGNED_URL = "https://photos.example.com/uploads/photo123.jpg?sig=super-secret-token&exp=999"
+    SIGNED_URL = "https://reference.example.com/photos/photo123.jpg?sig=super-secret-token&exp=999"
     SECRET = "super-secret-token"
-    REDACTED_HOST_AND_PATH = "photos.example.com/uploads/photo123.jpg"
+    REDACTED_HOST_AND_PATH = "reference.example.com/photos/photo123.jpg"
 
     def test_timeout_omits_query_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _raise_timeout(*args: object, **kwargs: object) -> None:
@@ -159,12 +169,12 @@ class TestFetchImageFromUrlReferenceVsServiceFault:
     """Only a definite 4xx on the reference link is REFERENCE_UNAVAILABLE.
 
     A timeout, connection/DNS/TLS failure, or the far end's own 5xx is an
-    unreachable-upstream fault (SERVICE_UNAVAILABLE), since it's not evidence
-    that specific photo/link is bad and must not read as "the reference
-    photo is broken".
+    unreachable-upstream fault (SERVICE_UNAVAILABLE) -- controller ruling
+    correcting the earlier contract, since it's not evidence that specific
+    photo/link is bad and must not read as "your reference photo is broken".
     """
 
-    URL = "https://photos.example.com/uploads/photo123.jpg"
+    URL = "https://reference.example.com/photos/photo123.jpg"
 
     def test_404_is_reference_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -220,43 +230,65 @@ class TestFetchImageFromUrlReferenceVsServiceFault:
         assert exc_info.value.error_code == ErrorCode.SERVICE_UNAVAILABLE
 
 
+class TestFetchErrorsDoNotChainTheSignedUrl:
+    """A logged traceback must not resurrect the query string `error` redacts.
+
+    requests puts the full URL (query string included) in its exception
+    messages. The redacted ImageProcessingError is raised inside the
+    `except`, so without `from None` Python chains the original exception
+    and any `logger.exception(...)` / traceback print shows it again.
+    """
+
+    SIGNED_URL = "https://reference.example.com/photos/photo123.jpg?sig=super-secret-token&exp=999"
+    SECRET = "super-secret-token"
+
+    @staticmethod
+    def _formatted(exc: BaseException) -> str:
+        return "".join(traceback.format_exception(exc))
+
+    @pytest.mark.parametrize(
+        "exc_type",
+        [
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.TooManyRedirects,
+        ],
+    )
+    def test_transport_errors_are_not_chained(
+        self, monkeypatch: pytest.MonkeyPatch, exc_type: type[Exception]
+    ) -> None:
+        def _raise(*args: object, **kwargs: object) -> None:
+            raise exc_type(f"Max retries exceeded with url: {self.SIGNED_URL}")
+
+        monkeypatch.setattr(image_utils_module.requests, "get", _raise)
+        with pytest.raises(ImageProcessingError) as exc_info:
+            fetch_image_from_url(self.SIGNED_URL)
+        assert self.SECRET not in self._formatted(exc_info.value)
+
+    @pytest.mark.parametrize("status_code", [404, 503])
+    def test_http_errors_are_not_chained(
+        self, monkeypatch: pytest.MonkeyPatch, status_code: int
+    ) -> None:
+        signed_url = self.SIGNED_URL
+
+        class _Response:
+            def __init__(self) -> None:
+                self.status_code = status_code
+
+            def raise_for_status(self) -> None:
+                error = requests.exceptions.HTTPError(f"{status_code} Error for url: {signed_url}")
+                error.response = self
+                raise error
+
+        monkeypatch.setattr(image_utils_module.requests, "get", lambda *a, **k: _Response())
+        with pytest.raises(ImageProcessingError) as exc_info:
+            fetch_image_from_url(self.SIGNED_URL)
+        assert self.SECRET not in self._formatted(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # API-level contract: main.py's routing of error_code -> status/image
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def fake_model() -> MagicMock:
-    """Stand-in for the FaceRecognitionModel singleton every endpoint resolves."""
-    model = MagicMock()
-    model.is_loaded.return_value = True
-    model.model_name = "fake"
-    model.get_model_info.return_value = {
-        "name": "fake",
-        "embedding_size": 512,
-        "backend": "insightface",
-        "device": "cpu",
-    }
-    return model
-
-
-@pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock) -> Generator[TestClient, None, None]:
-    """TestClient whose lifespan installs `fake_model` instead of loading InsightFace."""
-
-    def _fake_initialize_model() -> None:
-        face_model_module._model_instance = fake_model
-
-    monkeypatch.setattr(main_module, "initialize_model", _fake_initialize_model)
-    monkeypatch.setattr(main_module, "cleanup_model", lambda: None)
-    # Every scenario below controls fetch/decode directly; preprocessing is
-    # not what this suite is testing, so make it a no-op by default.
-    monkeypatch.setattr(main_module, "preprocess_image", lambda image: image)
-
-    with TestClient(main_module.app) as test_client:
-        yield test_client
-
-    face_model_module._model_instance = None
 
 
 def _compare_photos(client: TestClient, *, image1: str = "https://example.com/ref.jpg") -> Response:
@@ -337,7 +369,7 @@ class TestComparePhotosReferenceErrors:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
     ) -> None:
         monkeypatch.setattr(main_module, "fetch_image_from_url", lambda url: DUMMY_IMAGE)
-        fake_model.get_embedding.side_effect = FaceModelError("no face", ErrorCode.NO_FACE_DETECTED)
+        fake_model.analyze.side_effect = FaceModelError("no face", ErrorCode.NO_FACE_DETECTED)
 
         response = _compare_photos(client)
 
@@ -349,7 +381,7 @@ class TestComparePhotosReferenceErrors:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
     ) -> None:
         monkeypatch.setattr(main_module, "fetch_image_from_url", lambda url: DUMMY_IMAGE)
-        fake_model.get_embedding.side_effect = FaceModelError("blurry", ErrorCode.FACE_LOW_QUALITY)
+        fake_model.analyze.side_effect = FaceModelError("blurry", ErrorCode.FACE_LOW_QUALITY)
 
         response = _compare_photos(client)
 
@@ -368,12 +400,12 @@ class TestComparePhotosSelfieErrors:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
     ) -> None:
         self._ok_reference(monkeypatch)
-        fake_model.get_embedding.return_value = (np.ones(512, dtype=np.float32), 0.9)
+        fake_model.analyze.return_value = _face_result(np.ones(512, dtype=np.float32), 0.9)
 
-        def _raise_invalid(b64: str) -> np.ndarray:
+        def _raise_invalid(data: bytes) -> np.ndarray:
             raise ImageProcessingError("bad selfie bytes", ErrorCode.INVALID_IMAGE)
 
-        monkeypatch.setattr(main_module, "decode_base64_image", _raise_invalid)
+        monkeypatch.setattr(main_module, "decode_image_bytes", _raise_invalid)
 
         response = _compare_photos(client)
 
@@ -385,10 +417,10 @@ class TestComparePhotosSelfieErrors:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
     ) -> None:
         self._ok_reference(monkeypatch)
-        monkeypatch.setattr(main_module, "decode_base64_image", lambda b64: DUMMY_IMAGE)
+        monkeypatch.setattr(main_module, "decode_image_bytes", lambda data: DUMMY_IMAGE)
         # First call (reference) succeeds, second call (selfie) fails.
-        fake_model.get_embedding.side_effect = [
-            (np.ones(512, dtype=np.float32), 0.9),
+        fake_model.analyze.side_effect = [
+            _face_result(np.ones(512, dtype=np.float32), 0.9),
             FaceModelError("no face", ErrorCode.NO_FACE_DETECTED),
         ]
 
@@ -402,9 +434,9 @@ class TestComparePhotosSelfieErrors:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
     ) -> None:
         self._ok_reference(monkeypatch)
-        monkeypatch.setattr(main_module, "decode_base64_image", lambda b64: DUMMY_IMAGE)
-        fake_model.get_embedding.side_effect = [
-            (np.ones(512, dtype=np.float32), 0.9),
+        monkeypatch.setattr(main_module, "decode_image_bytes", lambda data: DUMMY_IMAGE)
+        fake_model.analyze.side_effect = [
+            _face_result(np.ones(512, dtype=np.float32), 0.9),
             FaceModelError("blurry", ErrorCode.FACE_LOW_QUALITY),
         ]
 
@@ -456,10 +488,11 @@ class TestComparePhotosServerProblems:
     def test_reference_timeout_returns_503_untagged(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A timeout on the reference fetch is an unreachable-upstream fault,
-        # not evidence that specific photo/link is bad -- it must route like
-        # a real outage (untagged, 503), so a caller can treat it as a
-        # transient failure instead of asking the photo's owner to reupload.
+        # Controller ruling: a timeout on the reference fetch is an
+        # unreachable-upstream fault, not evidence that specific photo/link
+        # is bad -- it must route like a real outage (untagged, 503), which
+        # the backend then maps to ERR-INT-008, not the caller-owned
+        # HR-037 "reupload your reference photo" path.
         def _raise_timeout(url: str) -> np.ndarray:
             raise ImageProcessingError("timed out", ErrorCode.SERVICE_UNAVAILABLE)
 
@@ -490,7 +523,7 @@ class TestComparePhotosServerProblems:
     def test_reference_upstream_500_returns_503_untagged(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A 5xx from the far end (e.g. a CDN) is their outage, not a bad link/photo.
+        # A 5xx from the reference host/CDN side is their outage, not a bad link/photo.
         def _raise_upstream_500(url: str) -> np.ndarray:
             raise ImageProcessingError("HTTP 500", ErrorCode.SERVICE_UNAVAILABLE)
 
@@ -527,6 +560,9 @@ class TestComparePhotosValidationKeepsOwnStatus:
             headers=AUTH_HEADERS,
         )
         assert response.status_code == 400
+        body = response.json()
+        assert body["error_code"] == ErrorCode.INVALID_REQUEST
+        assert "manhattan" in body["detail"]
 
     def test_successful_match_is_unaffected(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
@@ -534,9 +570,12 @@ class TestComparePhotosValidationKeepsOwnStatus:
         # Sanity check that the happy path still works after wrapping each
         # image stage in its own try/except.
         monkeypatch.setattr(main_module, "fetch_image_from_url", lambda url: DUMMY_IMAGE)
-        monkeypatch.setattr(main_module, "decode_base64_image", lambda b64: DUMMY_IMAGE)
+        monkeypatch.setattr(main_module, "decode_image_bytes", lambda data: DUMMY_IMAGE)
         embedding = np.ones(512, dtype=np.float32)
-        fake_model.get_embedding.side_effect = [(embedding, 0.95), (embedding, 0.93)]
+        fake_model.analyze.side_effect = [
+            _face_result(embedding, 0.95),
+            _face_result(embedding, 0.93),
+        ]
 
         response = _compare_photos(client)
 
@@ -546,6 +585,50 @@ class TestComparePhotosValidationKeepsOwnStatus:
         assert body["image1_detection_score"] == pytest.approx(0.95)
         assert body["image2_detection_score"] == pytest.approx(0.93)
 
+    def test_compare_photos_returns_quality_and_analyses_with_roles(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
+    ) -> None:
+        """/compare-photos must analyse image1 as the reference and image2 as
+        the selfie, and surface each side's (optional) quality metrics."""
+        monkeypatch.setattr(main_module, "fetch_image_from_url", lambda url: DUMMY_IMAGE)
+        monkeypatch.setattr(main_module, "decode_image_bytes", lambda data: DUMMY_IMAGE)
+        embedding = np.ones(512, dtype=np.float32)
+        quality1 = face_model_module.FaceQuality(
+            face_size_px=120.0,
+            interocular_px=40.0,
+            roll_deg=1.0,
+            yaw_proxy=0.05,
+            blur_variance=500.0,
+            embedding_norm=20.0,
+            faces_considered=1,
+            second_face_ratio=0.0,
+        )
+        quality2 = face_model_module.FaceQuality(
+            face_size_px=100.0,
+            interocular_px=35.0,
+            roll_deg=-2.0,
+            yaw_proxy=-0.1,
+            blur_variance=300.0,
+            embedding_norm=18.0,
+            faces_considered=1,
+            second_face_ratio=0.0,
+        )
+        fake_model.analyze.side_effect = [
+            _face_result(embedding, 0.95, quality=quality1),
+            _face_result(embedding, 0.93, quality=quality2),
+        ]
+
+        response = _compare_photos(client)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["image1_quality"]["face_size_px"] == pytest.approx(120.0)
+        assert body["image1_quality"]["interocular_px"] == pytest.approx(40.0)
+        assert body["image2_quality"]["face_size_px"] == pytest.approx(100.0)
+        assert body["image2_quality"]["interocular_px"] == pytest.approx(35.0)
+        roles = [call.kwargs.get("role") for call in fake_model.analyze.call_args_list]
+        assert roles == ["reference", "selfie"]
+
 
 class TestComparePhotosUploadSameContract:
     """/compare-photos-upload uses the same codes; image1~reference, image2~selfie."""
@@ -553,10 +636,10 @@ class TestComparePhotosUploadSameContract:
     def test_first_image_error_tagged_reference(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
     ) -> None:
-        def _decode(b64: str) -> np.ndarray:
+        def _decode(data: bytes) -> np.ndarray:
             raise ImageProcessingError("bad image1", ErrorCode.INVALID_IMAGE)
 
-        monkeypatch.setattr(main_module, "decode_base64_image", _decode)
+        monkeypatch.setattr(main_module, "decode_image_bytes", _decode)
 
         response = client.post(
             "/api/v1/compare-photos-upload",
@@ -575,9 +658,9 @@ class TestComparePhotosUploadSameContract:
     def test_second_image_error_tagged_selfie(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
     ) -> None:
-        monkeypatch.setattr(main_module, "decode_base64_image", lambda b64: DUMMY_IMAGE)
-        fake_model.get_embedding.side_effect = [
-            (np.ones(512, dtype=np.float32), 0.9),
+        monkeypatch.setattr(main_module, "decode_image_bytes", lambda data: DUMMY_IMAGE)
+        fake_model.analyze.side_effect = [
+            _face_result(np.ones(512, dtype=np.float32), 0.9),
             FaceModelError("no face", ErrorCode.NO_FACE_DETECTED),
         ]
 
@@ -615,7 +698,7 @@ class TestEmbedSameContract:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_model: MagicMock
     ) -> None:
         monkeypatch.setattr(main_module, "decode_base64_image", lambda b64: DUMMY_IMAGE)
-        fake_model.get_embedding.side_effect = FaceModelError("no face", ErrorCode.NO_FACE_DETECTED)
+        fake_model.analyze.side_effect = FaceModelError("no face", ErrorCode.NO_FACE_DETECTED)
 
         response = client.post(
             "/api/v1/embed",
